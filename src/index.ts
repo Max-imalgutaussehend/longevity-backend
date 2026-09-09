@@ -3,8 +3,8 @@ import cookie from '@fastify/cookie';
 import session from '@fastify/session';
 import { env } from './env.js';
 import { db } from './db/client.js';
-import { users, sources, samples, shareTokens, partnerOffers } from './db/schema.js';
-import { eq, desc, and } from 'drizzle-orm';
+import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots } from './db/schema.js';
+import { eq, desc, and, gte, asc } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
 import { computeScore, suggestLevers } from './score/index.js';
 import { generate } from './mock/generate.js';
@@ -155,12 +155,82 @@ const start = async () => {
     const user = await requireUser(req, reply);
     if (!user) return;
 
+    const now = new Date();
     const userSamples = await getUserSamples(user.id);
-    return computeScore({
+    const result = computeScore({
       profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
       samples: userSamples,
-      now: new Date(),
+      now,
     });
+
+    // Lazy upsert today's snapshot
+    const today = now.toISOString().slice(0, 10);
+    const [existing] = await db.select({ id: scoreSnapshots.id, engineVersion: scoreSnapshots.engineVersion })
+      .from(scoreSnapshots)
+      .where(and(eq(scoreSnapshots.userId, user.id), eq(scoreSnapshots.computedFor, today)))
+      .limit(1);
+
+    if (!existing || existing.engineVersion !== result.engineVersion) {
+      await db.insert(scoreSnapshots).values({
+        userId: user.id,
+        computedFor: today,
+        score: result.score,
+        coverage: result.coverage,
+        bioAge: result.bioAge,
+        breakdown: result as unknown as Record<string, unknown>,
+        engineVersion: result.engineVersion,
+      }).onConflictDoUpdate({
+        target: [scoreSnapshots.userId, scoreSnapshots.computedFor],
+        set: {
+          score: result.score,
+          coverage: result.coverage,
+          bioAge: result.bioAge,
+          breakdown: result as unknown as Record<string, unknown>,
+          engineVersion: result.engineVersion,
+        },
+      });
+    }
+
+    return result;
+  });
+
+  app.get('/api/score/history', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const daysParam = (req.query as Record<string, string>)['days'];
+    const days = Math.min(365, Math.max(1, parseInt(daysParam ?? '90', 10) || 90));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const rows = await db.select({
+      computedFor: scoreSnapshots.computedFor,
+      score: scoreSnapshots.score,
+      coverage: scoreSnapshots.coverage,
+    }).from(scoreSnapshots)
+      .where(and(eq(scoreSnapshots.userId, user.id), gte(scoreSnapshots.computedFor, since)))
+      .orderBy(asc(scoreSnapshots.computedFor));
+
+    return rows.map(r => ({
+      date: r.computedFor,
+      score: r.score,
+      coverage: r.coverage,
+    }));
+  });
+
+  app.get('/api/score/breakdown', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const dateParam = (req.query as Record<string, string>)['date'];
+    const targetDate = dateParam ?? new Date().toISOString().slice(0, 10);
+
+    const [row] = await db.select({ breakdown: scoreSnapshots.breakdown })
+      .from(scoreSnapshots)
+      .where(and(eq(scoreSnapshots.userId, user.id), eq(scoreSnapshots.computedFor, targetDate)))
+      .limit(1);
+
+    if (!row) return reply.status(404).send({ title: 'Kein Snapshot für dieses Datum.' });
+    return row.breakdown;
   });
 
   app.get('/api/score/levers', async (req, reply) => {
@@ -173,6 +243,44 @@ const start = async () => {
       samples: userSamples,
       now: new Date(),
     });
+  });
+
+  app.post('/api/score/simulate', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const body = req.body as { metric?: string; value?: number };
+    if (!body.metric || body.value === undefined) {
+      return reply.status(400).send({ title: 'metric und value erforderlich.' });
+    }
+
+    const userSamples = await getUserSamples(user.id);
+    const now = new Date();
+    const simulatedSamples = [
+      ...userSamples.filter(s => s.metric !== body.metric),
+      {
+        metric: body.metric as Sample['metric'],
+        value: body.value,
+        unit: '',
+        measuredAt: now.toISOString(),
+        sourceKind: 'questionnaire' as Sample['sourceKind'],
+      },
+    ];
+
+    const baseline = computeScore({
+      profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
+      samples: userSamples, now,
+    });
+    const simulated = computeScore({
+      profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
+      samples: simulatedSamples, now,
+    });
+
+    return {
+      baselineScore: baseline.score,
+      simulatedScore: simulated.score,
+      delta: simulated.score - baseline.score,
+    };
   });
 
   // ── Sources ───────────────────────────────────────────────────────────────────
@@ -192,6 +300,147 @@ const start = async () => {
       lastSyncAt: s.lastSyncAt?.toISOString() ?? null,
       sampleCount: countMap.get(s.id) ?? 0,
     }));
+  });
+
+  app.patch('/api/sources/:id', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { id } = req.params as { id: string };
+    const body = req.body as { enabled?: boolean };
+
+    if (body.enabled === undefined) {
+      return reply.status(400).send({ title: 'enabled-Feld fehlt.' });
+    }
+
+    const [row] = await db.select().from(sources)
+      .where(and(eq(sources.id, id), eq(sources.userId, user.id)))
+      .limit(1);
+
+    if (!row) return reply.status(404).send({ title: 'Quelle nicht gefunden.' });
+
+    await db.update(sources)
+      .set({ enabled: body.enabled, consentAt: body.enabled ? new Date() : null })
+      .where(eq(sources.id, id));
+
+    return reply.status(204).send();
+  });
+
+  app.post('/api/sources/:id/regenerate', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { id } = req.params as { id: string };
+    const [source] = await db.select().from(sources)
+      .where(and(eq(sources.id, id), eq(sources.userId, user.id)))
+      .limit(1);
+
+    if (!source) return reply.status(404).send({ title: 'Quelle nicht gefunden.' });
+    if (source.adapter !== 'mock') return reply.status(400).send({ title: 'Nur Mock-Quellen können regeneriert werden.' });
+
+    await db.delete(samples).where(and(eq(samples.sourceId, id), eq(samples.userId, user.id)));
+
+    const seed = user.id.charCodeAt(0) * 31 + Date.now() % 1000;
+    const newSamples = generate(seed, 90);
+    if (newSamples.length > 0) {
+      await db.insert(samples).values(newSamples.map(s => ({
+        userId: user.id, sourceId: id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      })));
+    }
+
+    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, id));
+
+    return { ok: true, sampleCount: newSamples.length };
+  });
+
+  // ── Report ────────────────────────────────────────────────────────────────────
+
+  app.get('/api/report/weekly', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const rows = await db.select({
+      computedFor: scoreSnapshots.computedFor,
+      score: scoreSnapshots.score,
+      breakdown: scoreSnapshots.breakdown,
+    }).from(scoreSnapshots)
+      .where(and(eq(scoreSnapshots.userId, user.id), gte(scoreSnapshots.computedFor, weekAgo)))
+      .orderBy(asc(scoreSnapshots.computedFor));
+
+    if (rows.length < 2) {
+      // Compute fresh and return single-point report
+      const userSamples = await getUserSamples(user.id);
+      const current = computeScore({
+        profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
+        samples: userSamples, now,
+      });
+      return {
+        weekStart: weekAgo,
+        scoreStart: current.score,
+        scoreEnd: current.score,
+        delta: 0,
+        bestMetric: 'vo2max',
+        worstMetric: 'smoking',
+        streakDays: rows.length,
+      };
+    }
+
+    const first = rows[0];
+    const last = rows[rows.length - 1];
+
+    // Find best/worst metric from latest breakdown
+    const breakdown = last.breakdown as { domains?: Array<{ metrics?: Array<{ metric: string; contribution: number }> }> };
+    const allMetrics: Array<{ metric: string; contribution: number }> = [];
+    for (const domain of breakdown.domains ?? []) {
+      for (const m of domain.metrics ?? []) {
+        if (m.contribution !== undefined) allMetrics.push(m);
+      }
+    }
+    allMetrics.sort((a, b) => b.contribution - a.contribution);
+    const bestMetric = allMetrics[0]?.metric ?? 'vo2max';
+    const worstMetric = allMetrics[allMetrics.length - 1]?.metric ?? 'smoking';
+
+    return {
+      weekStart: first.computedFor,
+      scoreStart: first.score,
+      scoreEnd: last.score,
+      delta: Math.round((last.score - first.score) * 10) / 10,
+      bestMetric,
+      worstMetric,
+      streakDays: rows.length,
+    };
+  });
+
+  app.post('/api/report/send', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    // Email sending is not yet wired — log and acknowledge
+    app.log.info({ userId: user.id }, 'Weekly report email requested');
+    return { ok: true, sentTo: user.email };
+  });
+
+  // ── Account ───────────────────────────────────────────────────────────────────
+
+  app.delete('/api/account', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const body = req.body as { password?: string };
+    if (!body.password) {
+      return reply.status(400).send({ title: 'Passwort erforderlich.' });
+    }
+
+    const ok = await argon2Verify(user.passwordHash, body.password);
+    if (!ok) return reply.status(401).send({ title: 'Falsches Passwort.' });
+
+    await req.session.destroy();
+    await db.delete(users).where(eq(users.id, user.id));
+    return reply.status(204).send();
   });
 
   // ── Share tokens ──────────────────────────────────────────────────────────────
@@ -221,9 +470,12 @@ const start = async () => {
       samples: userSamples, now: new Date(),
     });
 
+    const { days: daysReq } = req.body as { days?: number };
+    const validDays = [30, 90, 180].includes(daysReq ?? 0) ? (daysReq ?? 90) : 90;
+
     const id = crypto.randomUUID();
     const issuedAt = new Date();
-    const expiresAt = new Date(issuedAt.getTime() + 90 * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(issuedAt.getTime() + validDays * 24 * 60 * 60 * 1000);
 
     const [token] = await db.insert(shareTokens).values({
       id, userId: user.id,
@@ -268,7 +520,7 @@ const start = async () => {
 
   // ── Partner offers ────────────────────────────────────────────────────────────
 
-  app.get('/api/partner-offers', async (req) => {
+  const partnerOffersHandler = async (req: FastifyRequest) => {
     const rows = await db.select().from(partnerOffers).orderBy(partnerOffers.sortOrder);
     const userId = req.session.userId;
 
@@ -291,7 +543,10 @@ const start = async () => {
       valueLabel: o.valueLabel, isDemo: o.isDemo,
       qualified: band.low >= o.minBand,
     }));
-  });
+  };
+
+  app.get('/api/partner-offers', partnerOffersHandler);
+  app.get('/api/offers', partnerOffersHandler);
 
   try {
     await app.listen({ port: 3000, host: '0.0.0.0' });
