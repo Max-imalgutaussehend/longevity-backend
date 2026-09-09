@@ -12,6 +12,8 @@ import { generate } from './mock/generate.js';
 import { isWeakPassword } from './lib/weakPasswords.js';
 import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
 import { PgSessionStore } from './lib/pgSessionStore.js';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { Sample } from './score/types.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
@@ -70,6 +72,17 @@ const start = async () => {
       maxAge: 30 * 24 * 60 * 60 * 1000,
     },
     saveUninitialized: false,
+  });
+
+  // ── OpenAPI spec ──────────────────────────────────────────────────────────────
+
+  const openApiPath = resolve(process.cwd(), 'openapi.json');
+
+  app.get('/api/openapi.json', { config: {} }, async (req, reply) => {
+    if (!existsSync(openApiPath)) {
+      return reply.status(404).send({ title: 'openapi.json nicht gefunden. Bitte pnpm gen:openapi ausführen.' });
+    }
+    return reply.type('application/json').send(readFileSync(openApiPath, 'utf8'));
   });
 
   // ── Health ────────────────────────────────────────────────────────────────────

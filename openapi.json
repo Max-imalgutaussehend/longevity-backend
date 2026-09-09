@@ -1,0 +1,1044 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LONGEVITY API",
+    "version": "0.1.0",
+    "description": "Health-score MVP — backend API"
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "security": [
+    {
+      "cookieAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "sessionId"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "MetricResult": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          },
+          "percentile": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "ageDays": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "freshness": {
+            "type": "number"
+          },
+          "effectiveWeight": {
+            "type": "number"
+          },
+          "contribution": {
+            "type": "number"
+          },
+          "available": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DomainResult": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number"
+          },
+          "score": {
+            "type": "number"
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricResult"
+            }
+          }
+        }
+      },
+      "ScoreResult": {
+        "type": "object",
+        "properties": {
+          "score": {
+            "type": "number"
+          },
+          "coverage": {
+            "type": "number"
+          },
+          "bioAge": {
+            "type": "number"
+          },
+          "chronoAge": {
+            "type": "number"
+          },
+          "band": {
+            "type": "object",
+            "properties": {
+              "low": {
+                "type": "integer"
+              },
+              "high": {
+                "type": "integer"
+              }
+            }
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainResult"
+            }
+          },
+          "engineVersion": {
+            "type": "string"
+          },
+          "computedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "HistoryPoint": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "score": {
+            "type": "number"
+          },
+          "coverage": {
+            "type": "number"
+          }
+        }
+      },
+      "Source": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "adapter": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "lastSyncAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "sampleCount": {
+            "type": "integer"
+          }
+        }
+      },
+      "ShareToken": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "bandLow": {
+            "type": "integer"
+          },
+          "bandHigh": {
+            "type": "integer"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "partnerRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PartnerOffer": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "partnerName": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "minBand": {
+            "type": "integer"
+          },
+          "valueLabel": {
+            "type": "string"
+          },
+          "isDemo": {
+            "type": "boolean"
+          },
+          "qualified": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WeeklyReport": {
+        "type": "object",
+        "properties": {
+          "weekStart": {
+            "type": "string",
+            "format": "date"
+          },
+          "scoreStart": {
+            "type": "number"
+          },
+          "scoreEnd": {
+            "type": "number"
+          },
+          "delta": {
+            "type": "number"
+          },
+          "bestMetric": {
+            "type": "string"
+          },
+          "worstMetric": {
+            "type": "string"
+          },
+          "streakDays": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz",
+        "tags": [
+          "System"
+        ],
+        "security": [],
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "operationId": "register",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "summary": "Register",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password",
+                  "birthDate",
+                  "sex"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 10
+                  },
+                  "birthDate": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "sex": {
+                    "type": "string",
+                    "enum": [
+                      "m",
+                      "f"
+                    ]
+                  },
+                  "displayName": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "409": {
+            "description": "Email taken"
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "summary": "Login",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Wrong credentials"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Logout",
+        "responses": {
+          "204": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "operationId": "getMe",
+        "tags": [
+          "User"
+        ],
+        "summary": "Get current user",
+        "responses": {
+          "200": {
+            "description": "User object"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/score/current": {
+      "get": {
+        "operationId": "getScoreCurrent",
+        "tags": [
+          "Score"
+        ],
+        "summary": "Current score + lazy snapshot",
+        "responses": {
+          "200": {
+            "description": "ScoreResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/score/history": {
+      "get": {
+        "operationId": "getScoreHistory",
+        "tags": [
+          "Score"
+        ],
+        "summary": "Score history",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 90,
+              "maximum": 365
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HistoryPoint[]",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HistoryPoint"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/score/breakdown": {
+      "get": {
+        "operationId": "getScoreBreakdown",
+        "tags": [
+          "Score"
+        ],
+        "summary": "Stored breakdown for a date",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ScoreResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "No snapshot"
+          }
+        }
+      }
+    },
+    "/score/levers": {
+      "get": {
+        "operationId": "getScoreLevers",
+        "tags": [
+          "Score"
+        ],
+        "summary": "Top improvement levers",
+        "responses": {
+          "200": {
+            "description": "Levers array"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/score/simulate": {
+      "post": {
+        "operationId": "simulateScore",
+        "tags": [
+          "Score"
+        ],
+        "summary": "Simulate metric impact",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "metric",
+                  "value"
+                ],
+                "properties": {
+                  "metric": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Simulation delta"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/sources": {
+      "get": {
+        "operationId": "getSources",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "List data sources",
+        "responses": {
+          "200": {
+            "description": "Source[]",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Source"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/sources/{id}": {
+      "patch": {
+        "operationId": "patchSource",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Enable/disable source",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "enabled"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Updated"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/sources/{id}/regenerate": {
+      "post": {
+        "operationId": "regenerateSource",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Re-seed mock source",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "New sample count"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/sources/apple-health/upload": {
+      "post": {
+        "operationId": "uploadAppleHealth",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Upload Apple Health export.xml",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Inserted count"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/sources/health-auto-export/webhook": {
+      "post": {
+        "operationId": "healthAutoExportWebhook",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Health Auto Export JSON webhook",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Inserted count"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/labs": {
+      "post": {
+        "operationId": "postLabs",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Manual lab values",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "values"
+                ],
+                "properties": {
+                  "values": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "metric",
+                        "value",
+                        "unit"
+                      ],
+                      "properties": {
+                        "metric": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "number"
+                        },
+                        "unit": {
+                          "type": "string"
+                        },
+                        "measuredAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Inserted metrics"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/report/weekly": {
+      "get": {
+        "operationId": "getWeeklyReport",
+        "tags": [
+          "Report"
+        ],
+        "summary": "Weekly score report",
+        "responses": {
+          "200": {
+            "description": "WeeklyReport",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeeklyReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/report/send": {
+      "post": {
+        "operationId": "sendWeeklyReport",
+        "tags": [
+          "Report"
+        ],
+        "summary": "Email weekly report",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/account": {
+      "delete": {
+        "operationId": "deleteAccount",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Delete account",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Wrong password"
+          }
+        }
+      }
+    },
+    "/share-tokens": {
+      "get": {
+        "operationId": "getShareTokens",
+        "tags": [
+          "Share"
+        ],
+        "summary": "List share tokens",
+        "responses": {
+          "200": {
+            "description": "ShareToken[]",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ShareToken"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createShareToken",
+        "tags": [
+          "Share"
+        ],
+        "summary": "Create share token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "days": {
+                    "type": "integer",
+                    "enum": [
+                      30,
+                      90,
+                      180
+                    ],
+                    "default": 90
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "ShareToken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareToken"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/share-tokens/{id}": {
+      "delete": {
+        "operationId": "revokeShareToken",
+        "tags": [
+          "Share"
+        ],
+        "summary": "Revoke share token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/verify/{id}": {
+      "get": {
+        "operationId": "verifyToken",
+        "tags": [
+          "Share"
+        ],
+        "security": [],
+        "summary": "Public: verify share token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verification result"
+          }
+        }
+      }
+    },
+    "/partner-offers": {
+      "get": {
+        "operationId": "getPartnerOffers",
+        "tags": [
+          "Offers"
+        ],
+        "security": [],
+        "summary": "Partner offers",
+        "responses": {
+          "200": {
+            "description": "PartnerOffer[]",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PartnerOffer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/offers": {
+      "get": {
+        "operationId": "getOffers",
+        "tags": [
+          "Offers"
+        ],
+        "security": [],
+        "summary": "Alias for /partner-offers",
+        "responses": {
+          "200": {
+            "description": "PartnerOffer[]"
+          }
+        }
+      }
+    }
+  }
+}
