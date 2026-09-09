@@ -17,6 +17,7 @@ RUN corepack enable pnpm && addgroup -S app && adduser -S app -G app
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 RUN pnpm install --frozen-lockfile --prod
 COPY --from=build /app/dist ./dist
+COPY src/db/migrations ./src/db/migrations
 USER app
 EXPOSE 3000
 CMD ["node", "dist/index.js"]
