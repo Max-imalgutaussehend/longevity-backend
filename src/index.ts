@@ -8,6 +8,8 @@ import { eq, desc, and } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
 import { computeScore, suggestLevers } from './score/index.js';
 import { generate } from './mock/generate.js';
+import { isWeakPassword } from './lib/weakPasswords.js';
+import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
 import type { Sample } from './score/types.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
@@ -81,6 +83,9 @@ const start = async () => {
     }
     if (password.length < 10) {
       return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
+    }
+    if (isWeakPassword(password)) {
+      return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
     }
     if (sex !== 'm' && sex !== 'f') {
       return reply.status(400).send({ title: 'Ungültiges Geschlecht.' });
@@ -221,14 +226,22 @@ const start = async () => {
       samples: userSamples, now: new Date(),
     });
 
+    const { days: daysReq } = req.body as { days?: number };
+    const validDays = [30, 90, 180].includes(daysReq ?? 0) ? (daysReq ?? 90) : 90;
+
     const id = crypto.randomUUID();
     const issuedAt = new Date();
-    const expiresAt = new Date(issuedAt.getTime() + 90 * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(issuedAt.getTime() + validDays * 24 * 60 * 60 * 1000);
+
+    const payload = buildTokenPayload(id, score.band.low, score.band.high, expiresAt.toISOString());
+    const signature = env.SIGNING_KEY_PRIVATE
+      ? signTokenPayload(payload, env.SIGNING_KEY_PRIVATE)
+      : id;
 
     const [token] = await db.insert(shareTokens).values({
       id, userId: user.id,
       bandLow: score.band.low, bandHigh: score.band.high,
-      issuedAt, expiresAt, signature: id,
+      issuedAt, expiresAt, signature,
     }).returning();
 
     return reply.status(201).send({
@@ -257,6 +270,13 @@ const start = async () => {
     if (!token) return { valid: false, reason: 'not_found' };
     if (token.revokedAt) return { valid: false, reason: 'revoked' };
     if (new Date() > token.expiresAt) return { valid: false, reason: 'expired' };
+
+    // Verify Ed25519 signature when key is configured; fall back gracefully for legacy tokens
+    if (env.SIGNING_KEY_PUBLIC && token.signature !== token.id) {
+      const payload = buildTokenPayload(token.id, token.bandLow, token.bandHigh, token.expiresAt.toISOString());
+      const valid = verifyTokenSignature(payload, token.signature, env.SIGNING_KEY_PUBLIC);
+      if (!valid) return { valid: false, reason: 'invalid_signature' };
+    }
 
     return {
       valid: true,
