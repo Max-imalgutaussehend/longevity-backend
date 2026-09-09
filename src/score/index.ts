@@ -38,7 +38,8 @@ function computeZ(metric: string, value: number, age: number, sex: 'm' | 'f'): n
 }
 
 export function computeScore(input: ScoreInput): ScoreResult {
-  const { profile, samples, now } = input;
+  const { profile, samples } = input;
+  const now = input.now instanceof Date ? input.now : new Date(input.now);
   const age = ageYears(profile.birthDate, now);
 
   // Get most recent sample per metric with freshness
@@ -146,11 +147,12 @@ export function simulate(
   overrides: Partial<Record<Metric, number>>,
 ): { base: ScoreResult; simulated: ScoreResult; perMetric: { metric: Metric; delta: number }[] } {
   const base = computeScore(input);
+  const now = input.now instanceof Date ? input.now : new Date(input.now);
 
   const overriddenSamples = input.samples.filter(s => !(s.metric in overrides));
   for (const [metric, value] of Object.entries(overrides) as [Metric, number][]) {
     overriddenSamples.push({
-      metric, value, unit: '', measuredAt: input.now.toISOString(), sourceKind: 'apple_health',
+      metric, value, unit: '', measuredAt: now.toISOString(), sourceKind: 'apple_health',
     });
   }
 
@@ -161,7 +163,7 @@ export function simulate(
       ...input,
       samples: [
         ...input.samples.filter(s => s.metric !== metric),
-        { metric, value, unit: '', measuredAt: input.now.toISOString(), sourceKind: 'apple_health' },
+        { metric, value, unit: '', measuredAt: now.toISOString(), sourceKind: 'apple_health' },
       ],
     });
     return { metric, delta: Math.round((single.score - base.score) * 10) / 10 };
@@ -172,6 +174,7 @@ export function simulate(
 
 export function suggestLevers(input: ScoreInput): Lever[] {
   const base = computeScore(input);
+  const now = input.now instanceof Date ? input.now : new Date(input.now);
 
   return METRICS
     .map(def => {
@@ -185,7 +188,7 @@ export function suggestLevers(input: ScoreInput): Lever[] {
       } else {
         const ref = REFERENCE[def.metric];
         if (!ref) return null;
-        const age = ageYears(input.profile.birthDate, input.now);
+        const age = ageYears(input.profile.birthDate, now);
         const mu = ref.mu(age, input.profile.sex);
         const sigma = ref.sigma(input.profile.sex);
         const improvement = def.dir === 'higher' ? 0.5 * sigma : -0.5 * sigma;
@@ -196,7 +199,7 @@ export function suggestLevers(input: ScoreInput): Lever[] {
         ...input,
         samples: [
           ...input.samples.filter(s => s.metric !== def.metric),
-          { metric: def.metric, value: targetValue, unit: def.unit, measuredAt: input.now.toISOString(), sourceKind: 'apple_health' },
+          { metric: def.metric, value: targetValue, unit: def.unit, measuredAt: now.toISOString(), sourceKind: 'apple_health' },
         ],
       });
 

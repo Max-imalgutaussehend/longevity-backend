@@ -35,7 +35,7 @@ export const METRICS: MetricDef[] = [
   { metric: 'hba1c', domain: 'cardiometabolic', unit: '%', dir: 'lower', weight: 0.12, halfLifeDays: 180 },
   { metric: 'waist', domain: 'cardiometabolic', unit: 'cm', dir: 'lower', weight: 0.06, halfLifeDays: 365 },
   // recovery
-  { metric: 'sleep_duration', domain: 'recovery', unit: 'h', dir: 'target', weight: 0.34, halfLifeDays: 14 },
+  { metric: 'sleep_duration', domain: 'recovery', unit: 'h', dir: 'higher', weight: 0.34, halfLifeDays: 14 },
   { metric: 'sleep_consistency', domain: 'recovery', unit: 'min', dir: 'lower', weight: 0.33, halfLifeDays: 14 },
   { metric: 'hrv_rmssd', domain: 'recovery', unit: 'ms', dir: 'higher', weight: 0.33, halfLifeDays: 14 },
   // activity
@@ -43,7 +43,7 @@ export const METRICS: MetricDef[] = [
   { metric: 'steps', domain: 'activity', unit: 'steps/day', dir: 'higher', weight: 0.30, halfLifeDays: 14 },
   { metric: 'strength_sessions', domain: 'activity', unit: '/week', dir: 'higher', weight: 0.25, halfLifeDays: 14 },
   // risk
-  { metric: 'smoking', domain: 'risk', unit: 'category', dir: 'higher', weight: 0.45, halfLifeDays: 365 },
-  { metric: 'alcohol_units', domain: 'risk', unit: 'units/week', dir: 'lower', weight: 0.25, halfLifeDays: 365 },
-  { metric: 'hscrp', domain: 'risk', unit: 'mg/L', dir: 'lower', weight: 0.30, halfLifeDays: 180 },
+  { metric: 'smoking', domain: 'risk', unit: 'category', dir: 'higher', weight: 0.60, halfLifeDays: 365 },
+  { metric: 'alcohol_units', domain: 'risk', unit: 'units/week', dir: 'lower', weight: 0.15, halfLifeDays: 365 },
+  { metric: 'hscrp', domain: 'risk', unit: 'mg/L', dir: 'lower', weight: 0.25, halfLifeDays: 180 },
 ];

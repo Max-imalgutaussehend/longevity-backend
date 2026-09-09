@@ -58,5 +58,5 @@ export interface Lever {
 export interface ScoreInput {
   profile: { birthDate: string; sex: 'm' | 'f' };
   samples: Sample[];
-  now: Date;
+  now: Date | string;
 }

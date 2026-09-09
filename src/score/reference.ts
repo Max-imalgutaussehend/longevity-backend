@@ -40,7 +40,6 @@ export const REFERENCE: Record<string, RefParams> = {
   sleep_duration: {
     mu: () => 7.5,
     sigma: () => 0.9,
-    target: 7.5,
   },
   sleep_consistency: {
     mu: () => 55,
@@ -77,5 +76,5 @@ export const SMOKING_Z: Record<string, number> = {
   never: 0.6,
   former_gt_1y: 0.2,
   former_lt_1y: -0.4,
-  current: -2.5,
+  current: -3.0,
 };
