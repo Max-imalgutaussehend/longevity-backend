@@ -1,0 +1,51 @@
+{
+  "name": "longevity-backend",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "22.x",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:studio": "drizzle-kit studio",
+    "seed:demo": "tsx src/seed/demo.ts",
+    "seed:offers": "tsx src/seed/offers.ts",
+    "gen:openapi": "tsx src/scripts/genOpenApi.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^9.4.0",
+    "@fastify/cors": "^9.0.1",
+    "@fastify/multipart": "^8.3.0",
+    "@fastify/rate-limit": "^9.1.0",
+    "@fastify/session": "^10.9.0",
+    "@fastify/swagger": "^8.14.0",
+    "@node-rs/argon2": "^1.7.2",
+    "drizzle-orm": "^0.36.4",
+    "fastify": "^4.28.1",
+    "nodemailer": "^6.9.16",
+    "pg": "^8.13.1",
+    "postgres": "^3.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/nodemailer": "^6.4.17",
+    "@types/pg": "^8.11.10",
+    "@typescript-eslint/eslint-plugin": "^8.14.0",
+    "@typescript-eslint/parser": "^8.14.0",
+    "drizzle-kit": "^0.28.1",
+    "eslint": "^9.14.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}

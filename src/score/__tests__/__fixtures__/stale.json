@@ -1,0 +1,14 @@
+{
+  "profile": { "birthDate": "1997-03-14", "sex": "m" },
+  "now": "2026-09-09T12:00:00.000Z",
+  "samples": [
+    { "metric": "vo2max", "value": 52, "unit": "ml/kg/min", "measuredAt": "2025-07-31T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "resting_hr", "value": 58, "unit": "bpm", "measuredAt": "2025-07-31T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "hrv_rmssd", "value": 62, "unit": "ms", "measuredAt": "2025-07-31T00:00:00.000Z", "sourceKind": "oura" },
+    { "metric": "sleep_duration", "value": 7.4, "unit": "h", "measuredAt": "2025-07-31T00:00:00.000Z", "sourceKind": "oura" },
+    { "metric": "sleep_consistency", "value": 42, "unit": "min", "measuredAt": "2025-07-31T00:00:00.000Z", "sourceKind": "oura" },
+    { "metric": "zone2_minutes", "value": 110, "unit": "min/week", "measuredAt": "2025-07-31T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "steps", "value": 9200, "unit": "steps/day", "measuredAt": "2025-07-31T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "strength_sessions", "value": 2, "unit": "/week", "measuredAt": "2025-07-31T00:00:00.000Z", "sourceKind": "apple_health" }
+  ]
+}
