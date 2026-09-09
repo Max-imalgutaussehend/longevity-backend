@@ -11,6 +11,7 @@ import { computeScore, suggestLevers } from './score/index.js';
 import { generate } from './mock/generate.js';
 import { isWeakPassword } from './lib/weakPasswords.js';
 import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
+import { PgSessionStore } from './lib/pgSessionStore.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Sample } from './score/types.js';
@@ -60,6 +61,7 @@ const start = async () => {
   await app.register(cookie);
   await app.register(session, {
     secret: env.SESSION_SECRET,
+    store: new PgSessionStore(),
     cookie: {
       // Cloudflare terminates TLS — the API only sees HTTP from the tunnel.
       // Setting secure:true would suppress Set-Cookie on HTTP connections.
@@ -69,7 +71,7 @@ const start = async () => {
       sameSite: 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000,
     },
-    saveUninitialized: true,
+    saveUninitialized: false,
   });
 
   // ── OpenAPI spec ──────────────────────────────────────────────────────────────
@@ -472,6 +474,49 @@ const start = async () => {
     await req.session.destroy();
     await db.delete(users).where(eq(users.id, user.id));
     return reply.status(204).send();
+  });
+
+  // ── Lab values ────────────────────────────────────────────────────────────────
+
+  app.post('/api/labs', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const body = req.body as { values?: Array<{ metric: string; value: number; unit: string; measuredAt?: string }> };
+    if (!Array.isArray(body.values) || body.values.length === 0) {
+      return reply.status(400).send({ title: 'values-Array erforderlich.' });
+    }
+
+    // Upsert or create a "lab" source for this user
+    let [labSource] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'lab')))
+      .limit(1);
+
+    if (!labSource) {
+      [labSource] = await db.insert(sources).values({
+        userId: user.id, kind: 'lab', adapter: 'manual', enabled: true,
+        consentAt: new Date(), lastSyncAt: new Date(),
+      }).returning();
+    } else {
+      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, labSource.id));
+    }
+
+    const now = new Date();
+    const inserted: string[] = [];
+    for (const entry of body.values) {
+      if (!entry.metric || entry.value === undefined || !entry.unit) continue;
+      const measuredAt = entry.measuredAt ? new Date(entry.measuredAt) : now;
+      await db.insert(samples).values({
+        userId: user.id, sourceId: labSource.id,
+        metric: entry.metric, value: entry.value, unit: entry.unit, measuredAt,
+      }).onConflictDoUpdate({
+        target: [samples.userId, samples.metric, samples.measuredAt],
+        set: { value: entry.value, unit: entry.unit },
+      });
+      inserted.push(entry.metric);
+    }
+
+    return reply.status(201).send({ inserted, sourceId: labSource.id });
   });
 
   // ── Share tokens ──────────────────────────────────────────────────────────────
