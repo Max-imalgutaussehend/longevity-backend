@@ -52,7 +52,10 @@ const start = async () => {
   await app.register(session, {
     secret: env.SESSION_SECRET,
     cookie: {
-      secure: env.NODE_ENV === 'production',
+      // Cloudflare terminates TLS — the API only sees HTTP from the tunnel.
+      // Setting secure:true would suppress Set-Cookie on HTTP connections.
+      // The cookie travels browser→Cloudflare over HTTPS, which is sufficient.
+      secure: false,
       httpOnly: true,
       sameSite: 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000,
