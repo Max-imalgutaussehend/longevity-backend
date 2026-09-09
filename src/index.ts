@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import session from '@fastify/session';
 import rateLimit from '@fastify/rate-limit';
+import multipart from '@fastify/multipart';
 import { env } from './env.js';
 import { db } from './db/client.js';
 import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots } from './db/schema.js';
@@ -11,6 +12,8 @@ import { computeScore, suggestLevers } from './score/index.js';
 import { generate } from './mock/generate.js';
 import { isWeakPassword } from './lib/weakPasswords.js';
 import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
+import { parseAppleHealthXml } from './adapters/appleHealth.js';
+import { parseHealthAutoExport } from './adapters/healthAutoExport.js';
 import type { Sample } from './score/types.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
@@ -51,9 +54,8 @@ const start = async () => {
     trustProxy: true,
   });
 
-  await app.register(rateLimit, {
-    global: false,
-  });
+  await app.register(rateLimit, { global: false });
+  await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024 } }); // 200 MB cap for AH exports
 
   await app.register(cookie);
   await app.register(session, {
@@ -546,6 +548,79 @@ const start = async () => {
       issuedAt: token.issuedAt.toISOString(),
       expiresAt: token.expiresAt.toISOString(),
     };
+  });
+
+  // ── Apple Health XML upload ───────────────────────────────────────────────────
+
+  app.post('/api/sources/apple-health/upload', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const data = await req.file();
+    if (!data) return reply.status(400).send({ title: 'Keine Datei hochgeladen.' });
+
+    const parsedSamples = await parseAppleHealthXml(data.file);
+
+    let [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'apple_health')))
+      .limit(1);
+
+    if (!src) {
+      [src] = await db.insert(sources).values({
+        userId: user.id, kind: 'apple_health', adapter: 'upload',
+        enabled: true, consentAt: new Date(), lastSyncAt: new Date(),
+      }).returning();
+    } else {
+      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+    }
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      await db.insert(samples).values({
+        userId: user.id, sourceId: src.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoNothing();
+      inserted++;
+    }
+
+    return { inserted, sourceId: src.id };
+  });
+
+  // ── Health Auto Export webhook ─────────────────────────────────────────────────
+
+  app.post('/api/sources/health-auto-export/webhook', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload = req.body as any;
+    const parsedSamples = parseHealthAutoExport(payload);
+
+    let [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'apple_health'), eq(sources.adapter, 'health_auto_export')))
+      .limit(1);
+
+    if (!src) {
+      [src] = await db.insert(sources).values({
+        userId: user.id, kind: 'apple_health', adapter: 'health_auto_export',
+        enabled: true, consentAt: new Date(), lastSyncAt: new Date(),
+      }).returning();
+    } else {
+      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+    }
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      await db.insert(samples).values({
+        userId: user.id, sourceId: src.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoNothing();
+      inserted++;
+    }
+
+    return reply.status(200).send({ inserted, sourceId: src.id });
   });
 
   // ── Partner offers ────────────────────────────────────────────────────────────
