@@ -11,7 +11,10 @@ import { generate } from './mock/generate.js';
 import type { Sample } from './score/types.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
-const app = Fastify({ logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' } });
+const app = Fastify({
+  logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
+  trustProxy: true,
+});
 
 app.register(cookie);
 app.register(session, {
@@ -22,7 +25,7 @@ app.register(session, {
     sameSite: 'lax',
     maxAge: 30 * 24 * 60 * 60 * 1000,
   },
-  saveUninitialized: false,
+  saveUninitialized: true,
 });
 
 // ── Health ─────────────────────────────────────────────────────────────────────
@@ -34,8 +37,8 @@ app.get('/api/healthz', async () => {
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
 
-declare module '@fastify/session' {
-  interface FastifySessionObject {
+declare module 'fastify' {
+  interface Session {
     userId?: string;
   }
 }
