@@ -34,10 +34,14 @@ app.get('/api/healthz', async () => {
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
 
-type SessionData = { userId?: string };
+declare module '@fastify/session' {
+  interface FastifySessionObject {
+    userId?: string;
+  }
+}
 
 async function requireUser(req: FastifyRequest, reply: FastifyReply) {
-  const userId = (req.session as unknown as SessionData).userId;
+  const userId = req.session.userId;
   if (!userId) {
     reply.status(401).send({ title: 'Nicht angemeldet.' });
     return null;
@@ -90,7 +94,7 @@ app.post('/api/auth/register', async (req, reply) => {
     })));
   }
 
-  (req.session as unknown as SessionData).userId = user.id;
+  req.session.userId = user.id;
   return reply.status(201).send({ id: user.id, email: user.email });
 });
 
@@ -106,7 +110,7 @@ app.post('/api/auth/login', async (req, reply) => {
   const ok = await argon2Verify(user.passwordHash, password);
   if (!ok) return reply.status(401).send({ title: 'E-Mail oder Passwort falsch.' });
 
-  (req.session as unknown as SessionData).userId = user.id;
+  req.session.userId = user.id;
   return reply.status(200).send({ ok: true });
 });
 
@@ -262,7 +266,7 @@ app.get('/api/verify/:id', async (req) => {
 
 app.get('/api/partner-offers', async (req) => {
   const rows = await db.select().from(partnerOffers).orderBy(partnerOffers.sortOrder);
-  const userId = (req.session as unknown as SessionData).userId;
+  const userId = req.session.userId;
 
   let band = { low: 0, high: 100 };
   if (userId) {
