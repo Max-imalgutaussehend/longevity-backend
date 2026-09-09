@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import session from '@fastify/session';
+import rateLimit from '@fastify/rate-limit';
 import { env } from './env.js';
 import { db } from './db/client.js';
 import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots } from './db/schema.js';
@@ -8,6 +9,8 @@ import { eq, desc, and, gte, asc } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
 import { computeScore, suggestLevers } from './score/index.js';
 import { generate } from './mock/generate.js';
+import { isWeakPassword } from './lib/weakPasswords.js';
+import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
 import type { Sample } from './score/types.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
@@ -48,6 +51,10 @@ const start = async () => {
     trustProxy: true,
   });
 
+  await app.register(rateLimit, {
+    global: false,
+  });
+
   await app.register(cookie);
   await app.register(session, {
     secret: env.SESSION_SECRET,
@@ -82,6 +89,9 @@ const start = async () => {
     if (password.length < 10) {
       return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
     }
+    if (isWeakPassword(password)) {
+      return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
+    }
     if (sex !== 'm' && sex !== 'f') {
       return reply.status(400).send({ title: 'Ungültiges Geschlecht.' });
     }
@@ -113,7 +123,15 @@ const start = async () => {
     return reply.status(201).send({ id: user.id, email: user.email });
   });
 
-  app.post('/api/auth/login', async (req, reply) => {
+  app.post('/api/auth/login', {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ title: 'Zu viele Login-Versuche. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
     const { email, password } = req.body as { email?: string; password?: string };
     if (!email || !password) {
       return reply.status(400).send({ title: 'E-Mail und Passwort erforderlich.' });
@@ -477,10 +495,15 @@ const start = async () => {
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + validDays * 24 * 60 * 60 * 1000);
 
+    const payload = buildTokenPayload(id, score.band.low, score.band.high, expiresAt.toISOString());
+    const signature = env.SIGNING_KEY_PRIVATE
+      ? signTokenPayload(payload, env.SIGNING_KEY_PRIVATE)
+      : id;
+
     const [token] = await db.insert(shareTokens).values({
       id, userId: user.id,
       bandLow: score.band.low, bandHigh: score.band.high,
-      issuedAt, expiresAt, signature: id,
+      issuedAt, expiresAt, signature,
     }).returning();
 
     return reply.status(201).send({
@@ -509,6 +532,13 @@ const start = async () => {
     if (!token) return { valid: false, reason: 'not_found' };
     if (token.revokedAt) return { valid: false, reason: 'revoked' };
     if (new Date() > token.expiresAt) return { valid: false, reason: 'expired' };
+
+    // Verify Ed25519 signature when key is configured; fall back gracefully for legacy tokens
+    if (env.SIGNING_KEY_PUBLIC && token.signature !== token.id) {
+      const payload = buildTokenPayload(token.id, token.bandLow, token.bandHigh, token.expiresAt.toISOString());
+      const valid = verifyTokenSignature(payload, token.signature, env.SIGNING_KEY_PUBLIC);
+      if (!valid) return { valid: false, reason: 'invalid_signature' };
+    }
 
     return {
       valid: true,
