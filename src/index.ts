@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import session from '@fastify/session';
+import rateLimit from '@fastify/rate-limit';
 import { env } from './env.js';
 import { db } from './db/client.js';
 import { users, sources, samples, shareTokens, partnerOffers } from './db/schema.js';
@@ -46,6 +47,10 @@ const start = async () => {
   const app = Fastify({
     logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
     trustProxy: true,
+  });
+
+  await app.register(rateLimit, {
+    global: false,
   });
 
   await app.register(cookie);
@@ -113,7 +118,15 @@ const start = async () => {
     return reply.status(201).send({ id: user.id, email: user.email });
   });
 
-  app.post('/api/auth/login', async (req, reply) => {
+  app.post('/api/auth/login', {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ title: 'Zu viele Login-Versuche. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
     const { email, password } = req.body as { email?: string; password?: string };
     if (!email || !password) {
       return reply.status(400).send({ title: 'E-Mail und Passwort erforderlich.' });
