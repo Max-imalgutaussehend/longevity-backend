@@ -23,6 +23,7 @@ export const SOURCE_HALF_LIFE: Record<SourceKind, number> = {
   oura: 14,
   withings: 14,
   google_fit: 14,
+  health_auto_export: 14,
   lab: 180,
   questionnaire: 365,
 };
