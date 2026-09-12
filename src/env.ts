@@ -15,6 +15,8 @@ const schema = z.object({
   GOOGLE_FIT_CLIENT_SECRET: z.string().optional(),
   OURA_CLIENT_ID: z.string().optional(),
   OURA_CLIENT_SECRET: z.string().optional(),
+  STRAVA_CLIENT_ID: z.string().optional(),
+  STRAVA_CLIENT_SECRET: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

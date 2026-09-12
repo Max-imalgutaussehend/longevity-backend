@@ -21,6 +21,7 @@ import { oauthProviders, providerToSourceKind } from './lib/oauthProviders.js';
 import { fetchWithingsSamples } from './adapters/withings.js';
 import { fetchGoogleFitSamples } from './adapters/googleFit.js';
 import { fetchOuraSamples } from './adapters/oura.js';
+import { fetchStravaSamples } from './adapters/strava.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Sample } from './score/types.js';
@@ -555,6 +556,40 @@ const start = async () => {
         metric: s.metric, value: s.value, unit: s.unit,
         measuredAt: new Date(s.measuredAt),
       }).onConflictDoNothing();
+      inserted++;
+    }
+
+    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+
+    return { inserted, sourceId: src.id };
+  });
+
+  // ── Strava sync (Issue #34) ──────────────────────────────────────────────────
+
+  app.post('/api/sources/strava/sync', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'strava')))
+      .limit(1);
+
+    if (!src) return reply.status(404).send({ title: 'Strava ist nicht verbunden.' });
+
+    const since = src.lastSyncAt ? Math.floor(src.lastSyncAt.getTime() / 1000) : Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60;
+    const accessToken = await getValidToken(src.id, oauthProviders.strava);
+    const parsedSamples = await fetchStravaSamples(accessToken, since);
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      await db.insert(samples).values({
+        userId: user.id, sourceId: src.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoUpdate({
+        target: [samples.userId, samples.metric, samples.measuredAt],
+        set: { value: s.value },
+      });
       inserted++;
     }
 
