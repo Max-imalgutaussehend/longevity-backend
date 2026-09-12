@@ -859,6 +859,26 @@
         }
       }
     },
+    "/sources/withings/sync": {
+      "post": {
+        "operationId": "syncWithings",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Pull latest measures/activity/sleep from Withings",
+        "responses": {
+          "200": {
+            "description": "Inserted count"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not connected"
+          }
+        }
+      }
+    },
     "/labs": {
       "post": {
         "operationId": "postLabs",

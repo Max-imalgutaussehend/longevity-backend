@@ -1,0 +1,22 @@
+{
+  "status": 0,
+  "body": {
+    "measuregrps": [
+      {
+        "date": 1717200000,
+        "measures": [
+          { "value": 122, "type": 9, "unit": 0 },
+          { "value": 78, "type": 10, "unit": 0 },
+          { "value": 58, "type": 11, "unit": 0 }
+        ]
+      },
+      {
+        "date": 1717286400,
+        "measures": [
+          { "value": 1185, "type": 9, "unit": -1 },
+          { "value": 60, "type": 11, "unit": 0 }
+        ]
+      }
+    ]
+  }
+}
