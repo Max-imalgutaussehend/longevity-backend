@@ -16,8 +16,9 @@ import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib
 import { PgSessionStore } from './lib/pgSessionStore.js';
 import { parseAppleHealthXml } from './adapters/appleHealth.js';
 import { parseHealthAutoExport } from './adapters/healthAutoExport.js';
-import { exchangeCodeForToken } from './lib/oauthTokens.js';
+import { exchangeCodeForToken, getValidToken } from './lib/oauthTokens.js';
 import { oauthProviders, providerToSourceKind } from './lib/oauthProviders.js';
+import { fetchWithingsSamples } from './adapters/withings.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Sample } from './score/types.js';
@@ -468,6 +469,36 @@ const start = async () => {
     await db.update(sources).set({ credentials: null, enabled: false }).where(eq(sources.id, id));
 
     return reply.status(204).send();
+  });
+
+  // ── Withings sync (Issue #36) ────────────────────────────────────────────────
+
+  app.post('/api/sources/withings/sync', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'withings')))
+      .limit(1);
+
+    if (!src) return reply.status(404).send({ title: 'Withings ist nicht verbunden.' });
+
+    const accessToken = await getValidToken(src.id, oauthProviders.withings);
+    const parsedSamples = await fetchWithingsSamples(accessToken);
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      await db.insert(samples).values({
+        userId: user.id, sourceId: src.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoNothing();
+      inserted++;
+    }
+
+    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+
+    return { inserted, sourceId: src.id };
   });
 
   // ── Report ────────────────────────────────────────────────────────────────────
