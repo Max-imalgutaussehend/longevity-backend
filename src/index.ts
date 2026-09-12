@@ -16,6 +16,7 @@ import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib
 import { PgSessionStore } from './lib/pgSessionStore.js';
 import { parseAppleHealthXml } from './adapters/appleHealth.js';
 import { parseHealthAutoExport } from './adapters/healthAutoExport.js';
+import { parseFhirBundle } from './adapters/fhir.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Sample } from './score/types.js';
@@ -682,6 +683,48 @@ const start = async () => {
     }
 
     return reply.status(200).send({ inserted, sourceId: src.id });
+  });
+
+  // ── FHIR-Labor-Import (Issue #39) ─────────────────────────────────────────────
+
+  app.post('/api/sources/fhir/upload', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const body = req.body as unknown;
+    const parsedSamples = parseFhirBundle(body);
+
+    if (parsedSamples.length === 0) {
+      return reply.status(400).send({ title: 'Keine bekannten LOINC-Metriken im FHIR-Bundle gefunden.' });
+    }
+
+    let [labSource] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'lab')))
+      .limit(1);
+
+    if (!labSource) {
+      [labSource] = await db.insert(sources).values({
+        userId: user.id, kind: 'lab', adapter: 'fhir', enabled: true,
+        consentAt: new Date(), lastSyncAt: new Date(),
+      }).returning();
+    } else {
+      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, labSource.id));
+    }
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      await db.insert(samples).values({
+        userId: user.id, sourceId: labSource.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoUpdate({
+        target: [samples.userId, samples.metric, samples.measuredAt],
+        set: { value: s.value, unit: s.unit },
+      });
+      inserted++;
+    }
+
+    return reply.status(201).send({ inserted, sourceId: labSource.id });
   });
 
   // ── Partner offers ────────────────────────────────────────────────────────────
