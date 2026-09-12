@@ -1,0 +1,54 @@
+{
+  "bucket": [
+    {
+      "startTimeMillis": "1717200000000",
+      "endTimeMillis": "1717286400000",
+      "dataset": [
+        {
+          "dataSourceId": "derived:com.google.step_count.delta:com.google.android.gms:estimated_steps",
+          "point": [
+            {
+              "startTimeNanos": "1717200000000000000",
+              "endTimeNanos": "1717286400000000000",
+              "dataTypeName": "com.google.step_count.delta",
+              "value": [{ "intVal": 8421 }]
+            }
+          ]
+        },
+        {
+          "dataSourceId": "derived:com.google.heart_rate.bpm:com.google.android.gms:resting",
+          "point": [
+            {
+              "startTimeNanos": "1717200000000000000",
+              "endTimeNanos": "1717286400000000000",
+              "dataTypeName": "com.google.heart_rate.bpm",
+              "value": [{ "fpVal": 58.5 }]
+            }
+          ]
+        },
+        {
+          "dataSourceId": "derived:com.google.sleep.segment:com.google.android.gms:merged",
+          "point": [
+            {
+              "startTimeNanos": "1717221600000000000",
+              "endTimeNanos": "1717248600000000000",
+              "dataTypeName": "com.google.sleep.segment",
+              "value": [{ "intVal": 1 }]
+            }
+          ]
+        },
+        {
+          "dataSourceId": "derived:com.google.active_minutes:com.google.android.gms:merge_active_minutes",
+          "point": [
+            {
+              "startTimeNanos": "1717200000000000000",
+              "endTimeNanos": "1717286400000000000",
+              "dataTypeName": "com.google.active_minutes",
+              "value": [{ "intVal": 42 }]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
