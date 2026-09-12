@@ -21,6 +21,8 @@ export const DOMAIN_WEIGHTS: Record<Domain, number> = {
 export const SOURCE_HALF_LIFE: Record<SourceKind, number> = {
   apple_health: 14,
   oura: 14,
+  withings: 14,
+  google_fit: 14,
   lab: 180,
   questionnaire: 365,
 };

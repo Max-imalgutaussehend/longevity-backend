@@ -96,6 +96,28 @@ paths['/sources/health-auto-export/webhook'] = {
     responses: { 200: { description: 'Inserted count' }, ...auth401 } },
 };
 
+paths['/sources/{provider}/connect'] = {
+  post: { operationId: 'connectSourceProvider', tags: ['Sources'], summary: 'Start OAuth flow for a provider (withings, google-fit)',
+    parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string', enum: ['withings', 'google-fit'] } }],
+    responses: { 200: { description: 'Authorize URL' }, 404: { description: 'Unknown provider' }, ...auth401 } },
+};
+
+paths['/oauth/callback/{provider}'] = {
+  get: { operationId: 'oauthCallback', tags: ['Sources'], summary: 'OAuth redirect target — exchanges code for tokens',
+    parameters: [
+      { name: 'provider', in: 'path', required: true, schema: { type: 'string', enum: ['withings', 'google-fit'] } },
+      { name: 'code', in: 'query', required: true, schema: { type: 'string' } },
+      { name: 'state', in: 'query', required: true, schema: { type: 'string' } },
+    ],
+    responses: { 200: { description: 'Connected' }, 400: { description: 'Missing/invalid params' }, 404: { description: 'Unknown provider' } } },
+};
+
+paths['/sources/{id}/disconnect'] = {
+  delete: { operationId: 'disconnectSource', tags: ['Sources'], summary: 'Remove OAuth credentials, keep samples',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: { 204: { description: 'Disconnected' }, 404: { description: 'Not found' }, ...auth401 } },
+};
+
 paths['/labs'] = {
   post: { operationId: 'postLabs', tags: ['Sources'], summary: 'Manual lab values',
     requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['values'], properties: {
