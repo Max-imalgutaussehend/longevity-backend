@@ -97,15 +97,15 @@ paths['/sources/health-auto-export/webhook'] = {
 };
 
 paths['/sources/{provider}/connect'] = {
-  post: { operationId: 'connectSourceProvider', tags: ['Sources'], summary: 'Start OAuth flow for a provider (withings, google-fit)',
-    parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string', enum: ['withings', 'google-fit'] } }],
+  post: { operationId: 'connectSourceProvider', tags: ['Sources'], summary: 'Start OAuth flow for a provider (withings, google-fit, strava)',
+    parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string', enum: ['withings', 'google-fit', 'strava'] } }],
     responses: { 200: { description: 'Authorize URL' }, 404: { description: 'Unknown provider' }, ...auth401 } },
 };
 
 paths['/oauth/callback/{provider}'] = {
   get: { operationId: 'oauthCallback', tags: ['Sources'], summary: 'OAuth redirect target — exchanges code for tokens',
     parameters: [
-      { name: 'provider', in: 'path', required: true, schema: { type: 'string', enum: ['withings', 'google-fit'] } },
+      { name: 'provider', in: 'path', required: true, schema: { type: 'string', enum: ['withings', 'google-fit', 'strava'] } },
       { name: 'code', in: 'query', required: true, schema: { type: 'string' } },
       { name: 'state', in: 'query', required: true, schema: { type: 'string' } },
     ],
@@ -125,6 +125,11 @@ paths['/sources/withings/sync'] = {
 
 paths['/sources/google-fit/sync'] = {
   post: { operationId: 'syncGoogleFit', tags: ['Sources'], summary: 'Pull latest steps/HR/sleep/active-minutes from Google Fit',
+    responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
+};
+
+paths['/sources/strava/sync'] = {
+  post: { operationId: 'syncStrava', tags: ['Sources'], summary: 'Pull latest activities since last sync — strength_sessions + zone2_minutes',
     responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
 };
 

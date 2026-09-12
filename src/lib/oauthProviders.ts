@@ -24,10 +24,20 @@ export const oauthProviders: Record<string, OAuthProvider> = {
     ].join(' '),
     redirectUri: (baseUrl) => `${baseUrl}/api/oauth/callback/google-fit`,
   },
+  strava: {
+    kind: 'strava',
+    authorizeUrl: 'https://www.strava.com/oauth/authorize',
+    tokenUrl: 'https://www.strava.com/oauth/token',
+    clientId: env.STRAVA_CLIENT_ID,
+    clientSecret: env.STRAVA_CLIENT_SECRET,
+    scope: 'activity:read_all',
+    redirectUri: (baseUrl) => `${baseUrl}/api/oauth/callback/strava`,
+  },
 };
 
-export function providerToSourceKind(provider: string): 'withings' | 'google_fit' | null {
+export function providerToSourceKind(provider: string): 'withings' | 'google_fit' | 'strava' | null {
   if (provider === 'withings') return 'withings';
   if (provider === 'google-fit') return 'google_fit';
+  if (provider === 'strava') return 'strava';
   return null;
 }
