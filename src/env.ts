@@ -13,6 +13,8 @@ const schema = z.object({
   WITHINGS_CLIENT_SECRET: z.string().optional(),
   GOOGLE_FIT_CLIENT_ID: z.string().optional(),
   GOOGLE_FIT_CLIENT_SECRET: z.string().optional(),
+  OURA_CLIENT_ID: z.string().optional(),
+  OURA_CLIENT_SECRET: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

@@ -24,10 +24,20 @@ export const oauthProviders: Record<string, OAuthProvider> = {
     ].join(' '),
     redirectUri: (baseUrl) => `${baseUrl}/api/oauth/callback/google-fit`,
   },
+  oura: {
+    kind: 'oura',
+    authorizeUrl: 'https://cloud.ouraring.com/oauth/authorize',
+    tokenUrl: 'https://api.ouraring.com/oauth/token',
+    clientId: env.OURA_CLIENT_ID,
+    clientSecret: env.OURA_CLIENT_SECRET,
+    scope: 'daily',
+    redirectUri: (baseUrl) => `${baseUrl}/api/oauth/callback/oura`,
+  },
 };
 
-export function providerToSourceKind(provider: string): 'withings' | 'google_fit' | null {
+export function providerToSourceKind(provider: string): 'withings' | 'google_fit' | 'oura' | null {
   if (provider === 'withings') return 'withings';
   if (provider === 'google-fit') return 'google_fit';
+  if (provider === 'oura') return 'oura';
   return null;
 }
