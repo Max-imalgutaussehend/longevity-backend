@@ -44,6 +44,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
+      - run: pnpm db:migrate
       - run: pnpm test
 
       - name: Notify superprojekt
