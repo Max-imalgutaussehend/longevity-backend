@@ -151,6 +151,11 @@ paths['/account'] = {
     responses: { 204: { description: 'Deleted' }, 401: { description: 'Wrong password' } } },
 };
 
+paths['/account/export'] = {
+  get: { operationId: 'exportAccount', tags: ['Account'], summary: 'DSGVO Art. 20 data export — user, sources, samples, scoreSnapshots, shareTokens as JSON',
+    responses: { 200: { description: 'Full account data export (application/json, Content-Disposition: attachment)' }, ...auth401 } },
+};
+
 paths['/share-tokens'] = {
   get: { operationId: 'getShareTokens', tags: ['Share'], summary: 'List share tokens',
     responses: { 200: { description: 'ShareToken[]', content: { 'application/json': { schema: { type: 'array', items: ref('ShareToken') } } } }, ...auth401 } },
