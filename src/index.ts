@@ -16,6 +16,8 @@ import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib
 import { PgSessionStore } from './lib/pgSessionStore.js';
 import { parseAppleHealthXml } from './adapters/appleHealth.js';
 import { parseHealthAutoExport } from './adapters/healthAutoExport.js';
+import { exchangeCodeForToken } from './lib/oauthTokens.js';
+import { oauthProviders, providerToSourceKind } from './lib/oauthProviders.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Sample } from './score/types.js';
@@ -391,6 +393,81 @@ const start = async () => {
     await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, id));
 
     return { ok: true, sampleCount: newSamples.length };
+  });
+
+  // ── Generic OAuth (Issue #30 — Fundament für Withings/Google Fit/Oura/Strava) ───
+
+  app.post('/api/sources/:provider/connect', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { provider } = req.params as { provider: string };
+    const oauthProvider = oauthProviders[provider];
+    if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const state = Buffer.from(JSON.stringify({ userId: user.id, provider })).toString('base64url');
+
+    const url = new URL(oauthProvider.authorizeUrl);
+    url.searchParams.set('client_id', oauthProvider.clientId ?? '');
+    url.searchParams.set('redirect_uri', oauthProvider.redirectUri(baseUrl));
+    url.searchParams.set('scope', oauthProvider.scope);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('state', state);
+
+    return { url: url.toString() };
+  });
+
+  app.get('/api/oauth/callback/:provider', async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    const { code, state } = req.query as { code?: string; state?: string };
+    const oauthProvider = oauthProviders[provider];
+    if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+    if (!code || !state) return reply.status(400).send({ title: 'code oder state fehlt.' });
+
+    const sourceKind = providerToSourceKind(provider);
+    if (!sourceKind) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+
+    let userId: string;
+    try {
+      ({ userId } = JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as { userId: string });
+    } catch {
+      return reply.status(400).send({ title: 'Ungültiger state-Parameter.' });
+    }
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const credentials = await exchangeCodeForToken(oauthProvider, code, baseUrl);
+
+    let [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, userId), eq(sources.kind, sourceKind)))
+      .limit(1);
+
+    if (!src) {
+      [src] = await db.insert(sources).values({
+        userId, kind: sourceKind, adapter: provider,
+        enabled: true, consentAt: new Date(), credentials,
+      }).returning();
+    } else {
+      await db.update(sources).set({ credentials, enabled: true, consentAt: new Date() }).where(eq(sources.id, src.id));
+    }
+
+    return reply.status(200).send({ ok: true, sourceId: src.id });
+  });
+
+  app.delete('/api/sources/:id/disconnect', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { id } = req.params as { id: string };
+    const [source] = await db.select().from(sources)
+      .where(and(eq(sources.id, id), eq(sources.userId, user.id)))
+      .limit(1);
+
+    if (!source) return reply.status(404).send({ title: 'Quelle nicht gefunden.' });
+
+    await db.update(sources).set({ credentials: null, enabled: false }).where(eq(sources.id, id));
+
+    return reply.status(204).send();
   });
 
   // ── Report ────────────────────────────────────────────────────────────────────

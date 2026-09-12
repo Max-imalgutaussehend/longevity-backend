@@ -25,8 +25,16 @@ export const sources = pgTable('sources', {
   enabled: boolean('enabled').notNull().default(true),
   consentAt: timestamp('consent_at', { withTimezone: true }),
   lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+  credentials: jsonb('credentials').$type<OAuthCredentials>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ uniq: unique().on(t.userId, t.kind) }));
+
+export interface OAuthCredentials {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: string;
+  scope: string;
+}
 
 export const samples = pgTable('samples', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
