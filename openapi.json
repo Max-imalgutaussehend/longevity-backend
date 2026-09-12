@@ -1107,6 +1107,23 @@
         }
       }
     },
+    "/account/export": {
+      "get": {
+        "operationId": "exportAccount",
+        "tags": [
+          "Account"
+        ],
+        "summary": "DSGVO Art. 20 data export — user, sources, samples, scoreSnapshots, shareTokens as JSON",
+        "responses": {
+          "200": {
+            "description": "Full account data export (application/json, Content-Disposition: attachment)"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
     "/share-tokens": {
       "get": {
         "operationId": "getShareTokens",

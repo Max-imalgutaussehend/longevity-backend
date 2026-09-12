@@ -670,6 +670,51 @@ const start = async () => {
 
   // ── Account ───────────────────────────────────────────────────────────────────
 
+  app.get('/api/account/export', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const [userSources, userSamples, userSnapshots, userShareTokens] = await Promise.all([
+      db.select().from(sources).where(eq(sources.userId, user.id)),
+      db.select().from(samples).where(eq(samples.userId, user.id)),
+      db.select().from(scoreSnapshots).where(eq(scoreSnapshots.userId, user.id)),
+      db.select().from(shareTokens).where(eq(shareTokens.userId, user.id)),
+    ]);
+
+    const exportData = {
+      user: {
+        email: user.email,
+        displayName: user.displayName,
+        birthDate: user.birthDate,
+        sex: user.sex,
+        createdAt: user.createdAt.toISOString(),
+      },
+      sources: userSources.map((s) => ({
+        id: s.id, kind: s.kind, adapter: s.adapter, enabled: s.enabled,
+        consentAt: s.consentAt?.toISOString() ?? null,
+        lastSyncAt: s.lastSyncAt?.toISOString() ?? null,
+        createdAt: s.createdAt.toISOString(),
+      })),
+      samples: userSamples.map((s) => ({
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: s.measuredAt.toISOString(),
+      })),
+      scoreSnapshots: userSnapshots.map((s) => ({
+        computedFor: s.computedFor, score: s.score, coverage: s.coverage,
+        bioAge: s.bioAge, breakdown: s.breakdown, engineVersion: s.engineVersion,
+      })),
+      shareTokens: userShareTokens.map((t) => ({
+        bandLow: t.bandLow, bandHigh: t.bandHigh,
+        issuedAt: t.issuedAt.toISOString(), expiresAt: t.expiresAt.toISOString(),
+        revokedAt: t.revokedAt?.toISOString() ?? null, partnerRef: t.partnerRef,
+      })),
+    };
+
+    const date = new Date().toISOString().slice(0, 10);
+    reply.header('Content-Disposition', `attachment; filename="longevity-export-${date}.json"`);
+    return reply.type('application/json').send(exportData);
+  });
+
   app.delete('/api/account', async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
