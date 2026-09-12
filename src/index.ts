@@ -913,7 +913,7 @@ const start = async () => {
     const data = await req.file();
     if (!data) return reply.status(400).send({ title: 'Keine Datei hochgeladen.' });
 
-    const parsedSamples = await parseAppleHealthXml(data.file);
+    const parsedSamples = await parseAppleHealthXml(data.file, { birthDate: user.birthDate });
 
     let [src] = await db.select().from(sources)
       .where(and(eq(sources.userId, user.id), eq(sources.kind, 'apple_health')))

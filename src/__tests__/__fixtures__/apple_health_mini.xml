@@ -1,24 +1,40 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<HealthData>
-  <Record type="HKQuantityTypeIdentifierVO2Max" sourceName="Watch" unit="ml/kg/min" value="42.5" startDate="2024-06-01 08:00:00 +0200" endDate="2024-06-01 08:00:00 +0200"/>
-  <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Watch" unit="count" value="8421" startDate="2024-06-01 00:00:00 +0200" endDate="2024-06-01 23:59:59 +0200"/>
-  <Record type="HKQuantityTypeIdentifierSleepAnalysis" sourceName="Watch" unit="s" value="27000" startDate="2024-06-01 23:15:00 +0200" endDate="2024-06-02 07:00:00 +0200"/>
-  <Record type="HKQuantityTypeIdentifierSleepAnalysis" sourceName="Watch" unit="s" value="24300" startDate="2024-06-02 23:45:00 +0200" endDate="2024-06-03 06:30:00 +0200"/>
-  <Record type="HKQuantityTypeIdentifierSleepAnalysis" sourceName="Watch" unit="s" value="30000" startDate="2024-06-03 22:50:00 +0200" endDate="2024-06-04 07:10:00 +0200"/>
-  <Correlation type="HKCorrelationTypeIdentifierBloodPressure" sourceName="Watch" startDate="2024-06-01 08:00:00 +0200" endDate="2024-06-01 08:00:00 +0200">
-    <Record type="HKQuantityTypeIdentifierBloodPressureSystolic" sourceName="Watch" unit="mmHg" value="118" startDate="2024-06-01 08:00:00 +0200" endDate="2024-06-01 08:00:00 +0200"/>
-    <Record type="HKQuantityTypeIdentifierBloodPressureDiastolic" sourceName="Watch" unit="mmHg" value="76" startDate="2024-06-01 08:00:00 +0200" endDate="2024-06-01 08:00:00 +0200"/>
+<!DOCTYPE HealthData [
+]>
+<HealthData locale="de_DE">
+  <ExportDate value="2026-09-08 12:00:00 +0200"/>
+  <Me HKCharacteristicTypeIdentifierDateOfBirth="1996-05-15" HKCharacteristicTypeIdentifierBiologicalSex="HKBiologicalSexMale"/>
+
+  <!-- Existing Record mappings -->
+  <Record type="HKQuantityTypeIdentifierVO2Max" sourceName="Apple Watch" unit="ml/kg/min" value="48.5" startDate="2026-09-01 08:00:00 +0200" endDate="2026-09-01 08:00:00 +0200"/>
+  <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="bpm" value="58" startDate="2026-09-01 08:05:00 +0200" endDate="2026-09-01 08:05:00 +0200"/>
+  <Record type="HKQuantityTypeIdentifierWaistCircumference" sourceName="Health" unit="cm" value="82" startDate="2026-09-01 08:10:00 +0200" endDate="2026-09-01 08:10:00 +0200"/>
+  <Record type="HKQuantityTypeIdentifierHeartRateVariabilitySDNN" sourceName="Apple Watch" unit="ms" value="65" startDate="2026-09-01 08:15:00 +0200" endDate="2026-09-01 08:15:00 +0200"/>
+  <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Apple Watch" unit="count" value="8500" startDate="2026-09-01 08:00:00 +0200" endDate="2026-09-01 20:00:00 +0200"/>
+
+  <!-- Blood Pressure HKCorrelation -->
+  <Correlation type="HKCorrelationTypeIdentifierBloodPressure" sourceName="Withings" startDate="2026-09-02 08:30:00 +0200" endDate="2026-09-02 08:30:00 +0200">
+    <Record type="HKQuantityTypeIdentifierBloodPressureSystolic" unit="mmHg" value="120" startDate="2026-09-02 08:30:00 +0200" endDate="2026-09-02 08:30:00 +0200"/>
+    <Record type="HKQuantityTypeIdentifierBloodPressureDiastolic" unit="mmHg" value="80" startDate="2026-09-02 08:30:00 +0200" endDate="2026-09-02 08:30:00 +0200"/>
   </Correlation>
-  <Workout workoutActivityType="HKWorkoutActivityTypeTraditionalStrengthTraining" duration="45" durationUnit="min" sourceName="Watch" startDate="2024-06-03 18:00:00 +0200" endDate="2024-06-03 18:45:00 +0200">
-    <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" average="120" unit="count/min"/>
+
+  <!-- Strength Workouts (3 types) -->
+  <Workout workoutActivityType="HKWorkoutActivityTypeTraditionalStrengthTraining" duration="45" durationUnit="min" startDate="2026-09-03 17:00:00 +0200" endDate="2026-09-03 17:45:00 +0200"/>
+  <Workout workoutActivityType="HKWorkoutActivityTypeFunctionalStrengthTraining" duration="30" durationUnit="min" startDate="2026-09-04 18:00:00 +0200" endDate="2026-09-04 18:30:00 +0200"/>
+  <Workout workoutActivityType="HKWorkoutActivityTypeCrossTraining" duration="60" durationUnit="min" startDate="2026-09-05 10:00:00 +0200" endDate="2026-09-05 11:00:00 +0200"/>
+
+  <!-- Zone 2 Workout: Running (HR = 125 bpm, age ~30 -> HRmax=190, 60%=114, 70%=133) -->
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="40" durationUnit="min" startDate="2026-09-06 07:00:00 +0200" endDate="2026-09-06 07:40:00 +0200">
+    <MetadataEntry key="HKAverageHeartRate" value="125 count/min"/>
   </Workout>
-  <Workout workoutActivityType="HKWorkoutActivityTypeCrossTraining" duration="30" durationUnit="min" sourceName="Watch" startDate="2024-06-05 18:00:00 +0200" endDate="2024-06-05 18:30:00 +0200">
-    <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" average="115" unit="count/min"/>
+
+  <!-- Non-Zone 2 Workout: Running at 165 bpm (exceeds Zone 2 range) -->
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="30" durationUnit="min" startDate="2026-09-06 18:00:00 +0200" endDate="2026-09-06 18:30:00 +0200">
+    <MetadataEntry key="HKAverageHeartRate" value="165 count/min"/>
   </Workout>
-  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="40" durationUnit="min" sourceName="Watch" startDate="2024-06-04 07:00:00 +0200" endDate="2024-06-04 07:40:00 +0200">
-    <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" average="125" unit="count/min"/>
-  </Workout>
-  <Workout workoutActivityType="HKWorkoutActivityTypeCycling" duration="20" durationUnit="min" sourceName="Watch" startDate="2024-06-06 07:00:00 +0200" endDate="2024-06-06 07:20:00 +0200">
-    <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" average="165" unit="count/min"/>
-  </Workout>
+
+  <!-- Sleep Analysis: 3 nights (bedtimes 23:00, 23:30, 00:00 -> stddev = 30 min) -->
+  <Record type="HKCategoryTypeIdentifierSleepAnalysis" value="HKCategoryValueSleepAnalysisAsleep" startDate="2026-09-01 23:00:00 +0200" endDate="2026-09-02 07:00:00 +0200"/>
+  <Record type="HKCategoryTypeIdentifierSleepAnalysis" value="HKCategoryValueSleepAnalysisAsleep" startDate="2026-09-02 23:30:00 +0200" endDate="2026-09-03 07:30:00 +0200"/>
+  <Record type="HKCategoryTypeIdentifierSleepAnalysis" value="HKCategoryValueSleepAnalysisAsleep" startDate="2026-09-04 00:00:00 +0200" endDate="2026-09-04 07:30:00 +0200"/>
 </HealthData>
