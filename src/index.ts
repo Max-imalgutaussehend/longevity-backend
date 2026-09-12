@@ -3,12 +3,13 @@ import cookie from '@fastify/cookie';
 import session from '@fastify/session';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
+import { z } from 'zod';
 import { env } from './env.js';
 import { db } from './db/client.js';
 import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots } from './db/schema.js';
 import { eq, desc, and, gte, asc } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
-import { computeScore, suggestLevers } from './score/index.js';
+import { computeScore, simulate, suggestLevers } from './score/index.js';
 import { generate } from './mock/generate.js';
 import { isWeakPassword } from './lib/weakPasswords.js';
 import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
@@ -280,42 +281,44 @@ const start = async () => {
     });
   });
 
-  app.post('/api/score/simulate', async (req, reply) => {
+  const VALID_METRICS = [
+    'vo2max', 'resting_hr', 'systolic_bp', 'ldl', 'hdl', 'hba1c', 'waist',
+    'sleep_duration', 'sleep_consistency', 'hrv_rmssd',
+    'zone2_minutes', 'steps', 'strength_sessions',
+    'smoking', 'alcohol_units', 'hscrp',
+  ] as const;
+
+  const simulateBodySchema = z.object({
+    overrides: z.record(z.enum(VALID_METRICS), z.number()),
+  });
+
+  app.post('/api/score/simulate', {
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+        errorResponseBuilder: () => ({ type: 'about:blank', title: 'Rate-Limit überschritten.', status: 429, detail: 'Maximal 30 Simulationen pro Minute.' }),
+      },
+    },
+  }, async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
 
-    const body = req.body as { metric?: string; value?: number };
-    if (!body.metric || body.value === undefined) {
-      return reply.status(400).send({ title: 'metric und value erforderlich.' });
+    const parsed = simulateBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        type: 'about:blank', title: 'Ungültige Eingabe.', status: 400,
+        detail: parsed.error.issues.map(i => i.message).join('; '),
+      });
     }
 
     const userSamples = await getUserSamples(user.id);
-    const now = new Date();
-    const simulatedSamples = [
-      ...userSamples.filter(s => s.metric !== body.metric),
-      {
-        metric: body.metric as Sample['metric'],
-        value: body.value,
-        unit: '',
-        measuredAt: now.toISOString(),
-        sourceKind: 'questionnaire' as Sample['sourceKind'],
-      },
-    ];
+    const result = simulate(
+      { profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' }, samples: userSamples, now: new Date() },
+      parsed.data.overrides,
+    );
 
-    const baseline = computeScore({
-      profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
-      samples: userSamples, now,
-    });
-    const simulated = computeScore({
-      profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
-      samples: simulatedSamples, now,
-    });
-
-    return {
-      baselineScore: baseline.score,
-      simulatedScore: simulated.score,
-      delta: simulated.score - baseline.score,
-    };
+    return result;
   });
 
   // ── Sources ───────────────────────────────────────────────────────────────────
