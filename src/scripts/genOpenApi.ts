@@ -146,6 +146,12 @@ paths['/labs'] = {
     responses: { 201: { description: 'Inserted metrics' }, ...auth401 } },
 };
 
+paths['/sources/fhir/upload'] = {
+  post: { operationId: 'uploadFhir', tags: ['Sources'], summary: 'Import lab values from an HL7 FHIR R4 Bundle or Observation (LOINC-mapped, max 5MB)',
+    requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+    responses: { 201: { description: 'Inserted count' }, 400: { description: 'Invalid FHIR resource' }, ...auth401 } },
+};
+
 paths['/report/weekly'] = {
   get: { operationId: 'getWeeklyReport', tags: ['Report'], summary: 'Weekly score report',
     responses: { 200: { description: 'WeeklyReport', content: { 'application/json': { schema: ref('WeeklyReport') } } }, ...auth401 } },

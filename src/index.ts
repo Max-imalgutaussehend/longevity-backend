@@ -16,6 +16,7 @@ import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib
 import { PgSessionStore } from './lib/pgSessionStore.js';
 import { parseAppleHealthXml } from './adapters/appleHealth.js';
 import { parseHealthAutoExport } from './adapters/healthAutoExport.js';
+import { parseFhir, type FhirInput } from './adapters/fhir.js';
 import { exchangeCodeForToken, getValidToken } from './lib/oauthTokens.js';
 import { oauthProviders, providerToSourceKind } from './lib/oauthProviders.js';
 import { fetchWithingsSamples } from './adapters/withings.js';
@@ -724,6 +725,48 @@ const start = async () => {
         set: { value: entry.value, unit: entry.unit },
       });
       inserted.push(entry.metric);
+    }
+
+    return reply.status(201).send({ inserted, sourceId: labSource.id });
+  });
+
+  // ── FHIR lab import (Issue #39) ──────────────────────────────────────────────
+
+  app.post('/api/sources/fhir/upload', { bodyLimit: 5 * 1024 * 1024 }, async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const body = req.body as FhirInput;
+    if (!body || (body.resourceType !== 'Bundle' && body.resourceType !== 'Observation')) {
+      return reply.status(400).send({ title: 'Erwarte ein FHIR Bundle oder eine einzelne Observation.' });
+    }
+
+    const parsedSamples = parseFhir(body);
+
+    let [labSource] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'lab')))
+      .limit(1);
+
+    if (!labSource) {
+      [labSource] = await db.insert(sources).values({
+        userId: user.id, kind: 'lab', adapter: 'fhir', enabled: true,
+        consentAt: new Date(), lastSyncAt: new Date(),
+      }).returning();
+    } else {
+      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, labSource.id));
+    }
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      const rows = await db.insert(samples).values({
+        userId: user.id, sourceId: labSource.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoUpdate({
+        target: [samples.userId, samples.metric, samples.measuredAt],
+        set: { value: s.value, unit: s.unit },
+      }).returning({ id: samples.id });
+      if (rows.length > 0) inserted++;
     }
 
     return reply.status(201).send({ inserted, sourceId: labSource.id });

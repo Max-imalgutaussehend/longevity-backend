@@ -1,0 +1,54 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Observation",
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "13457-7", "display": "LDL Cholesterol" }] },
+        "valueQuantity": { "value": 110, "unit": "mg/dL" },
+        "effectiveDateTime": "2024-06-01T08:00:00Z"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Observation",
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "2085-9", "display": "HDL Cholesterol" }] },
+        "valueQuantity": { "value": 1.4, "unit": "mmol/L" },
+        "effectiveDateTime": "2024-06-01T08:00:00Z"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Observation",
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "4548-4", "display": "HbA1c" }] },
+        "valueQuantity": { "value": 5.2, "unit": "%" },
+        "effectiveDateTime": "2024-06-01T08:00:00Z"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Observation",
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "30522-7", "display": "hsCRP" }] },
+        "valueQuantity": { "value": 0.8, "unit": "mg/L" },
+        "effectiveDateTime": "2024-06-01T08:00:00Z"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Observation",
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8480-6", "display": "Systolic BP" }] },
+        "valueQuantity": { "value": 118, "unit": "mmHg" },
+        "effectiveDateTime": "2024-06-01T08:00:00Z"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Observation",
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "2093-3", "display": "Total Cholesterol" }] },
+        "valueQuantity": { "value": 190, "unit": "mg/dL" },
+        "effectiveDateTime": "2024-06-01T08:00:00Z"
+      }
+    }
+  ]
+}

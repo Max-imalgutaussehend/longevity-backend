@@ -1001,6 +1001,36 @@
         }
       }
     },
+    "/sources/fhir/upload": {
+      "post": {
+        "operationId": "uploadFhir",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Import lab values from an HL7 FHIR R4 Bundle or Observation (LOINC-mapped, max 5MB)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Inserted count"
+          },
+          "400": {
+            "description": "Invalid FHIR resource"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
     "/report/weekly": {
       "get": {
         "operationId": "getWeeklyReport",
