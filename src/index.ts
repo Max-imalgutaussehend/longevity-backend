@@ -20,6 +20,7 @@ import { exchangeCodeForToken, getValidToken } from './lib/oauthTokens.js';
 import { oauthProviders, providerToSourceKind } from './lib/oauthProviders.js';
 import { fetchWithingsSamples } from './adapters/withings.js';
 import { fetchGoogleFitSamples } from './adapters/googleFit.js';
+import { fetchOuraSamples } from './adapters/oura.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Sample } from './score/types.js';
@@ -516,6 +517,36 @@ const start = async () => {
 
     const accessToken = await getValidToken(src.id, oauthProviders['google-fit']);
     const parsedSamples = await fetchGoogleFitSamples(accessToken);
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      await db.insert(samples).values({
+        userId: user.id, sourceId: src.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoNothing();
+      inserted++;
+    }
+
+    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+
+    return { inserted, sourceId: src.id };
+  });
+
+  // ── Oura sync (Issue #33) ────────────────────────────────────────────────────
+
+  app.post('/api/sources/oura/sync', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'oura')))
+      .limit(1);
+
+    if (!src) return reply.status(404).send({ title: 'Oura ist nicht verbunden.' });
+
+    const accessToken = await getValidToken(src.id, oauthProviders.oura);
+    const parsedSamples = await fetchOuraSamples(accessToken);
 
     let inserted = 0;
     for (const s of parsedSamples) {

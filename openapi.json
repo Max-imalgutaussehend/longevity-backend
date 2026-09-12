@@ -751,7 +751,7 @@
         "tags": [
           "Sources"
         ],
-        "summary": "Start OAuth flow for a provider (withings, google-fit)",
+        "summary": "Start OAuth flow for a provider (withings, google-fit, oura)",
         "parameters": [
           {
             "name": "provider",
@@ -761,7 +761,8 @@
               "type": "string",
               "enum": [
                 "withings",
-                "google-fit"
+                "google-fit",
+                "oura"
               ]
             }
           }
@@ -795,7 +796,8 @@
               "type": "string",
               "enum": [
                 "withings",
-                "google-fit"
+                "google-fit",
+                "oura"
               ]
             }
           },
@@ -886,6 +888,26 @@
           "Sources"
         ],
         "summary": "Pull latest steps/HR/sleep/active-minutes from Google Fit",
+        "responses": {
+          "200": {
+            "description": "Inserted count"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not connected"
+          }
+        }
+      }
+    },
+    "/sources/oura/sync": {
+      "post": {
+        "operationId": "syncOura",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Pull latest sleep/readiness/activity from Oura",
         "responses": {
           "200": {
             "description": "Inserted count"

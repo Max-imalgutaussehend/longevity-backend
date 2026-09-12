@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "day": "2024-06-01",
+      "timestamp": "2024-06-01T07:00:00.000+02:00",
+      "contributors": { "hrv_balance": 80 },
+      "average_hrv": 42.5,
+      "resting_heart_rate": 54
+    },
+    {
+      "day": "2024-06-02",
+      "timestamp": "2024-06-02T07:00:00.000+02:00",
+      "contributors": { "hrv_balance": 75 },
+      "average_hrv": 39.1,
+      "resting_heart_rate": 56
+    }
+  ]
+}

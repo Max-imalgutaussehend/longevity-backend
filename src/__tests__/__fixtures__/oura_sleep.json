@@ -1,0 +1,7 @@
+{
+  "data": [
+    { "day": "2024-06-01", "total_sleep_duration": 27000, "bedtime_start": "2024-06-01T23:15:00.000+02:00" },
+    { "day": "2024-06-02", "total_sleep_duration": 25200, "bedtime_start": "2024-06-02T23:45:00.000+02:00" },
+    { "day": "2024-06-03", "total_sleep_duration": 28800, "bedtime_start": "2024-06-03T22:50:00.000+02:00" }
+  ]
+}
