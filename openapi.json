@@ -879,6 +879,26 @@
         }
       }
     },
+    "/sources/google-fit/sync": {
+      "post": {
+        "operationId": "syncGoogleFit",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Pull latest steps/HR/sleep/active-minutes from Google Fit",
+        "responses": {
+          "200": {
+            "description": "Inserted count"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not connected"
+          }
+        }
+      }
+    },
     "/labs": {
       "post": {
         "operationId": "postLabs",

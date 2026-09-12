@@ -123,6 +123,11 @@ paths['/sources/withings/sync'] = {
     responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
 };
 
+paths['/sources/google-fit/sync'] = {
+  post: { operationId: 'syncGoogleFit', tags: ['Sources'], summary: 'Pull latest steps/HR/sleep/active-minutes from Google Fit',
+    responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
+};
+
 paths['/labs'] = {
   post: { operationId: 'postLabs', tags: ['Sources'], summary: 'Manual lab values',
     requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['values'], properties: {
