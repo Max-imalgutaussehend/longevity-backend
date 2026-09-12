@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HealthData>
+  <Record type="HKQuantityTypeIdentifierVO2Max" sourceName="Watch" unit="ml/kg/min" value="42.5" startDate="2024-06-01 08:00:00 +0200" endDate="2024-06-01 08:00:00 +0200"/>
+  <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Watch" unit="count" value="8421" startDate="2024-06-01 00:00:00 +0200" endDate="2024-06-01 23:59:59 +0200"/>
+  <Record type="HKQuantityTypeIdentifierSleepAnalysis" sourceName="Watch" unit="s" value="27000" startDate="2024-06-01 23:15:00 +0200" endDate="2024-06-02 07:00:00 +0200"/>
+  <Record type="HKQuantityTypeIdentifierSleepAnalysis" sourceName="Watch" unit="s" value="24300" startDate="2024-06-02 23:45:00 +0200" endDate="2024-06-03 06:30:00 +0200"/>
+  <Record type="HKQuantityTypeIdentifierSleepAnalysis" sourceName="Watch" unit="s" value="30000" startDate="2024-06-03 22:50:00 +0200" endDate="2024-06-04 07:10:00 +0200"/>
+  <Correlation type="HKCorrelationTypeIdentifierBloodPressure" sourceName="Watch" startDate="2024-06-01 08:00:00 +0200" endDate="2024-06-01 08:00:00 +0200">
+    <Record type="HKQuantityTypeIdentifierBloodPressureSystolic" sourceName="Watch" unit="mmHg" value="118" startDate="2024-06-01 08:00:00 +0200" endDate="2024-06-01 08:00:00 +0200"/>
+    <Record type="HKQuantityTypeIdentifierBloodPressureDiastolic" sourceName="Watch" unit="mmHg" value="76" startDate="2024-06-01 08:00:00 +0200" endDate="2024-06-01 08:00:00 +0200"/>
+  </Correlation>
+  <Workout workoutActivityType="HKWorkoutActivityTypeTraditionalStrengthTraining" duration="45" durationUnit="min" sourceName="Watch" startDate="2024-06-03 18:00:00 +0200" endDate="2024-06-03 18:45:00 +0200">
+    <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" average="120" unit="count/min"/>
+  </Workout>
+  <Workout workoutActivityType="HKWorkoutActivityTypeCrossTraining" duration="30" durationUnit="min" sourceName="Watch" startDate="2024-06-05 18:00:00 +0200" endDate="2024-06-05 18:30:00 +0200">
+    <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" average="115" unit="count/min"/>
+  </Workout>
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="40" durationUnit="min" sourceName="Watch" startDate="2024-06-04 07:00:00 +0200" endDate="2024-06-04 07:40:00 +0200">
+    <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" average="125" unit="count/min"/>
+  </Workout>
+  <Workout workoutActivityType="HKWorkoutActivityTypeCycling" duration="20" durationUnit="min" sourceName="Watch" startDate="2024-06-06 07:00:00 +0200" endDate="2024-06-06 07:20:00 +0200">
+    <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" average="165" unit="count/min"/>
+  </Workout>
+</HealthData>
