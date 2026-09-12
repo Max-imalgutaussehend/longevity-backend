@@ -1,5 +1,5 @@
 import { clamp, Phi } from './stats.js';
-import { METRICS, DOMAIN_WEIGHTS, SOURCE_HALF_LIFE } from './metrics.js';
+import { METRICS, DOMAIN_WEIGHTS } from './metrics.js';
 import { REFERENCE, SMOKING_Z } from './reference.js';
 import type { ScoreInput, ScoreResult, MetricResult, DomainResult, Lever, Metric, Domain } from './types.js';
 
@@ -88,7 +88,7 @@ export function computeScore(input: ScoreInput): ScoreResult {
     metricResults.push({
       metric: def.metric, domain: def.domain,
       value: sample.value, unit: def.unit,
-      percentile: Math.round(100 * Phi(z)),
+      percentile: Math.round(metricScore),
       z, freshness, effectiveWeight,
       ageDays: Math.round((now.getTime() - new Date(sample.measuredAt).getTime()) / (1000 * 60 * 60 * 24)),
       contribution: 0, // filled below
