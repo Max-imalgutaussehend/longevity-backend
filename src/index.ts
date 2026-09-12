@@ -878,12 +878,12 @@ const start = async () => {
 
     let inserted = 0;
     for (const s of parsedSamples) {
-      await db.insert(samples).values({
+      const rows = await db.insert(samples).values({
         userId: user.id, sourceId: src.id,
         metric: s.metric, value: s.value, unit: s.unit,
         measuredAt: new Date(s.measuredAt),
-      }).onConflictDoNothing();
-      inserted++;
+      }).onConflictDoNothing().returning({ id: samples.id });
+      if (rows.length > 0) inserted++;
     }
 
     return reply.status(200).send({ inserted, sourceId: src.id });
