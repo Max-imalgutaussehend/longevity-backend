@@ -1011,7 +1011,45 @@
         "tags": [
           "Sources"
         ],
-        "summary": "Remove OAuth credentials, keep samples",
+        "summary": "Remove OAuth credentials, keep samples unless deleteData is true",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deleteData",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Disconnected"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/sources/{id}/samples": {
+      "delete": {
+        "operationId": "deleteSourceSamples",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Delete all samples for a source",
         "parameters": [
           {
             "name": "id",
@@ -1024,7 +1062,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Disconnected"
+            "description": "Samples deleted"
           },
           "401": {
             "description": "Unauthenticated"
