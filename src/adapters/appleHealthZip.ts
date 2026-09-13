@@ -24,6 +24,7 @@ export async function extractExportXml(zipBuffer: Buffer): Promise<Readable> {
       let found = false;
 
       zipfile.on('error', () => {
+        zipfile.close();
         reject(new AppleHealthZipError('Das ZIP-Archiv konnte nicht gelesen werden.'));
       });
 
@@ -38,9 +39,14 @@ export async function extractExportXml(zipBuffer: Buffer): Promise<Readable> {
         found = true;
         zipfile.openReadStream(entry, (streamErr, stream) => {
           if (streamErr || !stream) {
+            zipfile.close();
             reject(new AppleHealthZipError('Export.xml konnte im ZIP nicht geöffnet werden.'));
             return;
           }
+          // The zipfile handle (central directory state) is no longer needed
+          // once the entry's own read stream is open — release it explicitly
+          // rather than relying on readEntry()/'end' to ever fire again.
+          stream.on('end', () => zipfile.close());
           resolve(stream);
         });
       });
