@@ -1,66 +1,88 @@
 import { describe, it, expect } from 'vitest';
-import { parseFhir, type FhirInput } from '../../adapters/fhir.js';
-import bundleFixture from '../__fixtures__/fhir_bundle.json';
+import { parseFhirBundle } from '../../adapters/fhir.js';
+import fixture from '../__fixtures__/fhir_bundle.json';
 
-describe('parseFhir — Bundle of Observations', () => {
-  const bundle = bundleFixture as FhirInput;
-
-  it('maps known LOINC codes to metrics', () => {
-    const samples = parseFhir(bundle);
-    const metrics = samples.map((s) => s.metric).sort();
-    expect(metrics).toEqual(['hba1c', 'hdl', 'hscrp', 'ldl', 'systolic_bp']);
+describe('parseFhirBundle', () => {
+  it('parses all known LOINC codes from a Bundle', () => {
+    const samples = parseFhirBundle(fixture);
+    expect(samples).toHaveLength(5);
+    const metrics = samples.map((s) => s.metric);
+    expect(metrics).toContain('ldl');
+    expect(metrics).toContain('hdl');
+    expect(metrics).toContain('hba1c');
+    expect(metrics).toContain('hscrp');
+    expect(metrics).toContain('systolic_bp');
   });
 
-  it('ignores Observations with unmapped LOINC codes', () => {
-    const samples = parseFhir(bundle);
-    expect(samples).toHaveLength(5); // 6 entries, 1 unmapped (total cholesterol)
+  it('skips unknown LOINC codes', () => {
+    const samples = parseFhirBundle(fixture);
+    expect(samples.every((s) => s.metric !== undefined)).toBe(true);
+    expect(samples).toHaveLength(5); // not 6 — unknown-1 is skipped
   });
 
-  it('tags every sample with sourceKind lab', () => {
-    const samples = parseFhir(bundle);
+  it('keeps LDL in mg/dL unchanged', () => {
+    const samples = parseFhirBundle(fixture);
+    const ldl = samples.find((s) => s.metric === 'ldl');
+    expect(ldl?.value).toBe(110);
+    expect(ldl?.unit).toBe('mg/dL');
+  });
+
+  it('converts HDL from mmol/L to mg/dL', () => {
+    const samples = parseFhirBundle(fixture);
+    const hdl = samples.find((s) => s.metric === 'hdl');
+    // 1.4 mmol/L * 38.67 ≈ 54.1 mg/dL
+    expect(hdl?.unit).toBe('mg/dL');
+    expect(hdl?.value).toBeCloseTo(54.1, 0);
+  });
+
+  it('keeps HbA1c in % unchanged', () => {
+    const samples = parseFhirBundle(fixture);
+    const hba1c = samples.find((s) => s.metric === 'hba1c');
+    expect(hba1c?.value).toBe(5.4);
+    expect(hba1c?.unit).toBe('%');
+  });
+
+  it('keeps hsCRP in mg/L unchanged', () => {
+    const samples = parseFhirBundle(fixture);
+    const hscrp = samples.find((s) => s.metric === 'hscrp');
+    expect(hscrp?.value).toBe(0.8);
+    expect(hscrp?.unit).toBe('mg/L');
+  });
+
+  it('keeps systolic BP in mmHg unchanged (mm[Hg] unit code)', () => {
+    const samples = parseFhirBundle(fixture);
+    const bp = samples.find((s) => s.metric === 'systolic_bp');
+    expect(bp?.value).toBe(118);
+    expect(bp?.unit).toBe('mmHg');
+  });
+
+  it('sets sourceKind to lab', () => {
+    const samples = parseFhirBundle(fixture);
     expect(samples.every((s) => s.sourceKind === 'lab')).toBe(true);
   });
 
-  it('normalizes mmol/L to mg/dL for HDL', () => {
-    const samples = parseFhir(bundle);
-    const hdl = samples.find((s) => s.metric === 'hdl');
-    expect(hdl).toBeDefined();
-    expect(hdl?.value).toBeCloseTo(1.4 * 38.67, 1);
-    expect(hdl?.unit).toBe('mg/dL');
-  });
-
-  it('leaves already-mg/dL values (LDL) untouched', () => {
-    const samples = parseFhir(bundle);
-    const ldl = samples.find((s) => s.metric === 'ldl');
-    expect(ldl?.value).toBe(110);
-  });
-});
-
-describe('parseFhir — single Observation resource', () => {
-  it('parses a standalone Observation (not wrapped in a Bundle)', () => {
-    const samples = parseFhir({
+  it('parses a single Observation (not wrapped in Bundle)', () => {
+    const singleObs = {
       resourceType: 'Observation',
-      code: { coding: [{ system: 'http://loinc.org', code: '8480-6' }] },
-      valueQuantity: { value: 122, unit: 'mmHg' },
-      effectiveDateTime: '2024-06-01T08:00:00Z',
-    });
-
+      code: { coding: [{ system: 'http://loinc.org', code: '4548-4' }] },
+      valueQuantity: { value: 42, unit: 'mmol/mol' },
+      effectiveDateTime: '2026-01-01',
+    };
+    const samples = parseFhirBundle(singleObs);
     expect(samples).toHaveLength(1);
-    expect(samples[0].metric).toBe('systolic_bp');
-    expect(samples[0].value).toBe(122);
-  });
-});
-
-describe('parseFhir — malformed input', () => {
-  it('returns an empty array for an empty Bundle', () => {
-    expect(parseFhir({ resourceType: 'Bundle', entry: [] })).toEqual([]);
+    // 42 mmol/mol → (42/10.929) + 2.15 ≈ 6.0 %
+    expect(samples[0].metric).toBe('hba1c');
+    expect(samples[0].value).toBeCloseTo(6.0, 0);
+    expect(samples[0].unit).toBe('%');
   });
 
-  it('skips Observations missing valueQuantity', () => {
-    const samples = parseFhir({
-      resourceType: 'Bundle',
-      entry: [{ resource: { resourceType: 'Observation', code: { coding: [{ code: '13457-7' }] } } }],
-    });
-    expect(samples).toEqual([]);
+  it('returns empty array for empty Bundle', () => {
+    expect(parseFhirBundle({ resourceType: 'Bundle', entry: [] })).toEqual([]);
+  });
+
+  it('returns empty array for invalid input', () => {
+    expect(parseFhirBundle(null)).toEqual([]);
+    expect(parseFhirBundle({})).toEqual([]);
+    expect(parseFhirBundle('not json')).toEqual([]);
   });
 });

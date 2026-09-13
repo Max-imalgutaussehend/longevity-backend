@@ -16,7 +16,7 @@ import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib
 import { PgSessionStore } from './lib/pgSessionStore.js';
 import { parseAppleHealthXml } from './adapters/appleHealth.js';
 import { parseHealthAutoExport } from './adapters/healthAutoExport.js';
-import { parseFhir, type FhirInput } from './adapters/fhir.js';
+import { parseFhirBundle } from './adapters/fhir.js';
 import { exchangeCodeForToken, getValidToken } from './lib/oauthTokens.js';
 import { oauthProviders, providerToSourceKind } from './lib/oauthProviders.js';
 import { fetchWithingsSamples } from './adapters/withings.js';
@@ -781,12 +781,10 @@ const start = async () => {
     const user = await requireUser(req, reply);
     if (!user) return;
 
-    const body = req.body as FhirInput;
-    if (!body || (body.resourceType !== 'Bundle' && body.resourceType !== 'Observation')) {
-      return reply.status(400).send({ title: 'Erwarte ein FHIR Bundle oder eine einzelne Observation.' });
+    const parsedSamples = parseFhirBundle(req.body);
+    if (parsedSamples.length === 0) {
+      return reply.status(400).send({ title: 'Keine bekannten LOINC-Metriken im FHIR-Bundle gefunden.' });
     }
-
-    const parsedSamples = parseFhir(body);
 
     let [labSource] = await db.select().from(sources)
       .where(and(eq(sources.userId, user.id), eq(sources.kind, 'lab')))

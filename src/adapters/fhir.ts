@@ -1,84 +1,110 @@
 import type { Sample } from '../score/types.js';
-import { LOINC_MAP, normalizeUnit } from './loinc.js';
 
-interface FhirCoding {
-  system?: string;
-  code?: string;
-  display?: string;
-}
-
-interface FhirCodeableConcept {
-  coding?: FhirCoding[];
-}
+// LOINC code → our metric key + unit normalizer
+const LOINC_MAP: Record<string, {
+  metric: Extract<Sample['metric'], 'ldl' | 'hdl' | 'hba1c' | 'hscrp' | 'systolic_bp'>;
+  toMgDl?: boolean;  // convert mmol/L → mg/dL (cholesterol)
+  toPercent?: boolean;  // convert mmol/mol → %  (HbA1c IFCC)
+  unit: string;
+}> = {
+  '13457-7': { metric: 'ldl',        toMgDl: true,    unit: 'mg/dL' },
+  '2085-9':  { metric: 'hdl',        toMgDl: true,    unit: 'mg/dL' },
+  '4548-4':  { metric: 'hba1c',      toPercent: true, unit: '%'     },
+  '30522-7': { metric: 'hscrp',                       unit: 'mg/L'  },
+  '8480-6':  { metric: 'systolic_bp',                 unit: 'mmHg'  },
+};
 
 interface FhirQuantity {
   value?: number;
   unit?: string;
 }
 
-interface FhirObservation {
-  resourceType: 'Observation';
-  code?: FhirCodeableConcept;
-  valueQuantity?: FhirQuantity;
-  effectiveDateTime?: string;
-  issued?: string;
+interface FhirCoding {
+  system?: string;
+  code?: string;
 }
 
-interface FhirBundleEntry {
-  resource?: FhirObservation | { resourceType: string };
+interface FhirObservation {
+  resourceType: 'Observation';
+  code?: { coding?: FhirCoding[] };
+  valueQuantity?: FhirQuantity;
+  effectiveDateTime?: string;
+  effectivePeriod?: { start?: string; end?: string };
 }
 
 interface FhirBundle {
   resourceType: 'Bundle';
-  entry?: FhirBundleEntry[];
+  entry?: Array<{ resource?: unknown }>;
 }
 
-export type FhirInput = FhirBundle | FhirObservation;
+function normalizeUnit(value: number, unit: string | undefined, toMgDl?: boolean, toPercent?: boolean): number {
+  const u = (unit ?? '').toLowerCase().replace(/\s/g, '');
 
-function isObservation(resource: unknown): resource is FhirObservation {
-  return !!resource && typeof resource === 'object' && (resource as { resourceType?: string }).resourceType === 'Observation';
-}
-
-function loincCode(observation: FhirObservation): string | null {
-  const codings = observation.code?.coding ?? [];
-  const loinc = codings.find((c) => c.system?.includes('loinc') || /^\d{1,5}-\d$/.test(c.code ?? ''));
-  return loinc?.code ?? null;
-}
-
-function parseObservation(observation: FhirObservation): Sample | null {
-  const code = loincCode(observation);
-  if (!code) return null;
-
-  const mapping = LOINC_MAP[code];
-  if (!mapping) return null;
-
-  const quantity = observation.valueQuantity;
-  if (!quantity || typeof quantity.value !== 'number') return null;
-
-  const measuredAt = observation.effectiveDateTime ?? observation.issued;
-  if (!measuredAt) return null;
-
-  const value = normalizeUnit(mapping.metric, quantity.value, quantity.unit ?? mapping.unit);
-
-  return {
-    metric: mapping.metric,
-    value,
-    unit: mapping.unit,
-    measuredAt: new Date(measuredAt).toISOString(),
-    sourceKind: 'lab',
-  };
-}
-
-export function parseFhir(input: FhirInput): Sample[] {
-  const observations: FhirObservation[] = input.resourceType === 'Bundle'
-    ? (input.entry ?? []).map((e) => e.resource).filter(isObservation)
-    : (isObservation(input) ? [input] : []);
-
-  const samples: Sample[] = [];
-  for (const observation of observations) {
-    const sample = parseObservation(observation);
-    if (sample) samples.push(sample);
+  if (toMgDl) {
+    if (u === 'mmol/l') return Math.round(value * 38.67 * 10) / 10;
+    return value;
   }
 
-  return samples;
+  if (toPercent) {
+    // HbA1c IFCC (mmol/mol) → DCCT/NGSP (%)
+    if (u === 'mmol/mol') return Math.round(((value / 10.929) + 2.15) * 10) / 10;
+    return value;
+  }
+
+  // hsCRP: mg/dL → mg/L
+  if (u === 'mg/dl') return value * 10;
+  // μg/L → mg/L
+  if (u === 'µg/l' || u === 'ug/l') return value / 1000;
+
+  return value;
+}
+
+function parseDate(obs: FhirObservation): Date {
+  const dt = obs.effectiveDateTime ?? obs.effectivePeriod?.end ?? obs.effectivePeriod?.start;
+  return dt ? new Date(dt) : new Date();
+}
+
+function extractObservations(resource: unknown): FhirObservation[] {
+  if (!resource || typeof resource !== 'object') return [];
+  const r = resource as { resourceType?: string };
+
+  if (r.resourceType === 'Observation') return [r as FhirObservation];
+
+  if (r.resourceType === 'Bundle') {
+    const bundle = r as FhirBundle;
+    return (bundle.entry ?? [])
+      .map((e) => e.resource)
+      .flatMap((res) => extractObservations(res));
+  }
+
+  return [];
+}
+
+export function parseFhirBundle(json: unknown): Sample[] {
+  const observations = extractObservations(json);
+  const results: Sample[] = [];
+
+  for (const obs of observations) {
+    const coding = obs.code?.coding ?? [];
+    const loincCode = coding.find((c) => c.system === 'http://loinc.org')?.code;
+    if (!loincCode) continue;
+
+    const mapping = LOINC_MAP[loincCode];
+    if (!mapping) continue;
+
+    const raw = obs.valueQuantity?.value;
+    if (raw === undefined || raw === null) continue;
+
+    const value = normalizeUnit(raw, obs.valueQuantity?.unit, mapping.toMgDl, mapping.toPercent);
+
+    results.push({
+      metric: mapping.metric,
+      value,
+      unit: mapping.unit,
+      measuredAt: parseDate(obs).toISOString(),
+      sourceKind: 'lab',
+    });
+  }
+
+  return results;
 }

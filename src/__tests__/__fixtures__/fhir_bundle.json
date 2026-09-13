@@ -5,49 +5,85 @@
     {
       "resource": {
         "resourceType": "Observation",
-        "code": { "coding": [{ "system": "http://loinc.org", "code": "13457-7", "display": "LDL Cholesterol" }] },
-        "valueQuantity": { "value": 110, "unit": "mg/dL" },
-        "effectiveDateTime": "2024-06-01T08:00:00Z"
+        "id": "ldl-1",
+        "status": "final",
+        "code": {
+          "coding": [
+            { "system": "http://loinc.org", "code": "13457-7", "display": "Cholesterol in LDL [Mass/volume] in Serum or Plasma by calculation" }
+          ]
+        },
+        "effectiveDateTime": "2026-09-01",
+        "valueQuantity": { "value": 110, "unit": "mg/dL", "system": "http://unitsofmeasure.org", "code": "mg/dL" }
       }
     },
     {
       "resource": {
         "resourceType": "Observation",
-        "code": { "coding": [{ "system": "http://loinc.org", "code": "2085-9", "display": "HDL Cholesterol" }] },
-        "valueQuantity": { "value": 1.4, "unit": "mmol/L" },
-        "effectiveDateTime": "2024-06-01T08:00:00Z"
+        "id": "hdl-1",
+        "status": "final",
+        "code": {
+          "coding": [
+            { "system": "http://loinc.org", "code": "2085-9", "display": "Cholesterol in HDL [Mass/volume] in Serum or Plasma" }
+          ]
+        },
+        "effectiveDateTime": "2026-09-01",
+        "valueQuantity": { "value": 1.4, "unit": "mmol/L", "system": "http://unitsofmeasure.org", "code": "mmol/L" }
       }
     },
     {
       "resource": {
         "resourceType": "Observation",
-        "code": { "coding": [{ "system": "http://loinc.org", "code": "4548-4", "display": "HbA1c" }] },
-        "valueQuantity": { "value": 5.2, "unit": "%" },
-        "effectiveDateTime": "2024-06-01T08:00:00Z"
+        "id": "hba1c-1",
+        "status": "final",
+        "code": {
+          "coding": [
+            { "system": "http://loinc.org", "code": "4548-4", "display": "Hemoglobin A1c/Hemoglobin.total in Blood" }
+          ]
+        },
+        "effectiveDateTime": "2026-09-01",
+        "valueQuantity": { "value": 5.4, "unit": "%", "system": "http://unitsofmeasure.org", "code": "%" }
       }
     },
     {
       "resource": {
         "resourceType": "Observation",
-        "code": { "coding": [{ "system": "http://loinc.org", "code": "30522-7", "display": "hsCRP" }] },
-        "valueQuantity": { "value": 0.8, "unit": "mg/L" },
-        "effectiveDateTime": "2024-06-01T08:00:00Z"
+        "id": "hscrp-1",
+        "status": "final",
+        "code": {
+          "coding": [
+            { "system": "http://loinc.org", "code": "30522-7", "display": "C reactive protein [Mass/volume] in Serum or Plasma by High sensitivity method" }
+          ]
+        },
+        "effectiveDateTime": "2026-09-01",
+        "valueQuantity": { "value": 0.8, "unit": "mg/L", "system": "http://unitsofmeasure.org", "code": "mg/L" }
       }
     },
     {
       "resource": {
         "resourceType": "Observation",
-        "code": { "coding": [{ "system": "http://loinc.org", "code": "8480-6", "display": "Systolic BP" }] },
-        "valueQuantity": { "value": 118, "unit": "mmHg" },
-        "effectiveDateTime": "2024-06-01T08:00:00Z"
+        "id": "systolic-1",
+        "status": "final",
+        "code": {
+          "coding": [
+            { "system": "http://loinc.org", "code": "8480-6", "display": "Systolic blood pressure" }
+          ]
+        },
+        "effectiveDateTime": "2026-09-01",
+        "valueQuantity": { "value": 118, "unit": "mm[Hg]", "system": "http://unitsofmeasure.org", "code": "mm[Hg]" }
       }
     },
     {
       "resource": {
         "resourceType": "Observation",
-        "code": { "coding": [{ "system": "http://loinc.org", "code": "2093-3", "display": "Total Cholesterol" }] },
-        "valueQuantity": { "value": 190, "unit": "mg/dL" },
-        "effectiveDateTime": "2024-06-01T08:00:00Z"
+        "id": "unknown-1",
+        "status": "final",
+        "code": {
+          "coding": [
+            { "system": "http://loinc.org", "code": "9999-0", "display": "Unknown metric" }
+          ]
+        },
+        "effectiveDateTime": "2026-09-01",
+        "valueQuantity": { "value": 42, "unit": "units" }
       }
     }
   ]
