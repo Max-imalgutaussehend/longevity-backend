@@ -83,6 +83,11 @@ const METRIC_MAP: Record<string, { metric: Sample['metric']; toValue: (dp: HaeDa
   },
 };
 
+export interface HealthAutoExportOptions {
+  birthDate?: string | Date;
+  userAge?: number;
+}
+
 function parseSleepConsistency(metrics: HaeMetric[]): Sample | null {
   const sleepMetric = metrics.find((m) => m.name === 'SleepAnalysis');
   if (!sleepMetric) return null;
@@ -91,7 +96,9 @@ function parseSleepConsistency(metrics: HaeMetric[]): Sample | null {
     .filter((dp) => dp.date)
     .map((dp) => {
       const d = new Date(dp.date);
-      return d.getHours() * 60 + d.getMinutes();
+      const hour = d.getUTCHours();
+      const minute = d.getUTCMinutes();
+      return hour >= 12 ? (hour - 12) * 60 + minute : (hour + 12) * 60 + minute;
     });
 
   if (startMinutes.length < 2) return null;
@@ -109,8 +116,21 @@ function parseSleepConsistency(metrics: HaeMetric[]): Sample | null {
   };
 }
 
-function parseZone2Minutes(workouts: HaeWorkout[]): Sample | null {
-  const hrMax = 220 - DEFAULT_AGE_FOR_HRMAX;
+function parseZone2Minutes(workouts: HaeWorkout[], options?: HealthAutoExportOptions): Sample | null {
+  let age = DEFAULT_AGE_FOR_HRMAX;
+  if (options?.birthDate) {
+    const birth = new Date(options.birthDate);
+    if (!isNaN(birth.getTime())) {
+      const today = new Date();
+      age = today.getFullYear() - birth.getFullYear();
+      const m = today.getMonth() - birth.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+    }
+  } else if (options?.userAge && options.userAge > 0) {
+    age = options.userAge;
+  }
+
+  const hrMax = 220 - age;
   const zone2Workouts = workouts.filter((w) => {
     if (w.heartRateAvg === undefined) return false;
     return w.heartRateAvg >= hrMax * ZONE2_LOW_PCT && w.heartRateAvg <= hrMax * ZONE2_HIGH_PCT;
@@ -119,12 +139,14 @@ function parseZone2Minutes(workouts: HaeWorkout[]): Sample | null {
   if (zone2Workouts.length === 0) return null;
 
   const totalMinutes = zone2Workouts.reduce((sum, w) => sum + (w.duration ?? 0) / 60, 0);
+  const lastWorkout = zone2Workouts[zone2Workouts.length - 1];
+  const measuredAt = lastWorkout?.start ? new Date(lastWorkout.start).toISOString() : new Date().toISOString();
 
   return {
     metric: 'zone2_minutes',
     value: totalMinutes,
     unit: 'min',
-    measuredAt: new Date().toISOString(),
+    measuredAt,
     sourceKind: 'health_auto_export',
   };
 }
@@ -147,7 +169,7 @@ function parseStrengthSessions(workouts: HaeWorkout[]): Sample[] {
   }));
 }
 
-export function parseHealthAutoExport(payload: HaePayload): Sample[] {
+export function parseHealthAutoExport(payload: HaePayload, options?: HealthAutoExportOptions): Sample[] {
   const metrics: HaeMetric[] = Array.isArray(payload) ? payload : (payload.metrics ?? []);
   const workouts = payload.workouts ?? [];
   const samples: Sample[] = [];
@@ -174,7 +196,7 @@ export function parseHealthAutoExport(payload: HaePayload): Sample[] {
   const consistency = parseSleepConsistency(metrics);
   if (consistency) samples.push(consistency);
 
-  const zone2 = parseZone2Minutes(workouts);
+  const zone2 = parseZone2Minutes(workouts, options);
   if (zone2) samples.push(zone2);
 
   samples.push(...parseStrengthSessions(workouts));
