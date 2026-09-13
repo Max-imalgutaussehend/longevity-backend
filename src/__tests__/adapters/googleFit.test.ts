@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseGoogleFitAggregate, type GoogleFitAggregateResponse } from '../../adapters/googleFit.js';
+import { parseGoogleFitAggregate, parseGoogleHealthV4DataPoints, type GoogleFitAggregateResponse } from '../../adapters/googleFit.js';
 import rawFixture from '../__fixtures__/google_fit_aggregate.json';
 
 const fixture = rawFixture as GoogleFitAggregateResponse;
@@ -59,3 +59,59 @@ describe('parseGoogleFitAggregate', () => {
     expect(samples).toEqual([]);
   });
 });
+
+describe('parseGoogleHealthV4DataPoints', () => {
+  it('parses steps data points', () => {
+    const samples = parseGoogleHealthV4DataPoints('steps', [
+      { steps: { count: '7500', interval: { startTime: '2026-09-13T00:00:00Z', endTime: '2026-09-13T23:59:59Z' } } },
+    ]);
+    expect(samples).toHaveLength(1);
+    expect(samples[0]).toMatchObject({
+      metric: 'steps',
+      value: 7500,
+      unit: 'steps',
+      sourceKind: 'google_fit',
+    });
+  });
+
+  it('parses daily-resting-heart-rate data points', () => {
+    const samples = parseGoogleHealthV4DataPoints('daily-resting-heart-rate', [
+      { dailyRestingHeartRate: { beatsPerMinute: '56', date: { year: 2026, month: 9, day: 13 } } },
+    ]);
+    expect(samples).toHaveLength(1);
+    expect(samples[0]).toMatchObject({
+      metric: 'resting_hr',
+      value: 56,
+      unit: 'bpm',
+      sourceKind: 'google_fit',
+    });
+  });
+
+  it('parses sleep data points and calculates duration', () => {
+    const samples = parseGoogleHealthV4DataPoints('sleep', [
+      { sleep: { interval: { startTime: '2026-09-13T00:00:00Z', endTime: '2026-09-13T08:00:00Z' } } },
+    ]);
+    expect(samples).toHaveLength(1);
+    expect(samples[0].metric).toBe('sleep_duration');
+    expect(samples[0].value).toBe(8);
+    expect(samples[0].unit).toBe('h');
+  });
+
+  it('parses active-minutes data points', () => {
+    const samples = parseGoogleHealthV4DataPoints('active-minutes', [
+      {
+        activeMinutes: {
+          interval: { startTime: '2026-09-13T08:00:00Z', endTime: '2026-09-13T09:00:00Z' },
+          activeMinutesByActivityLevel: [{ activeMinutes: 30 }, { activeMinutes: 15 }],
+        },
+      },
+    ]);
+    expect(samples).toHaveLength(1);
+    expect(samples[0]).toMatchObject({
+      metric: 'zone2_minutes',
+      value: 45,
+      unit: 'min',
+    });
+  });
+});
+

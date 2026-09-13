@@ -177,6 +177,72 @@ const start = async () => {
     return reply.status(204).send();
   });
 
+  // ── Google Sign-In ────────────────────────────────────────────────────────────
+
+  app.post('/api/auth/google/url', async (req) => {
+    const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
+    if (!googleClientId) return { url: null };
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const redirectUri = env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/auth/google/callback`;
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id', googleClientId);
+    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', 'openid email profile');
+    url.searchParams.set('prompt', 'select_account');
+    return { url: url.toString() };
+  });
+
+  app.get('/api/auth/google/callback', async (req, reply) => {
+    const { code } = req.query as { code?: string };
+    const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
+    const googleClientSecret = env.GOOGLE_FIT_CLIENT_SECRET ?? env.GOOGLE_HEALTH_CLIENT_SECRET;
+    if (!googleClientId || !googleClientSecret || !code) {
+      return reply.redirect('/login?error=google_auth_failed');
+    }
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const redirectUri = env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/auth/google/callback`;
+
+    try {
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          client_id: googleClientId,
+          client_secret: googleClientSecret,
+          redirect_uri: redirectUri,
+        }),
+      });
+      if (!tokenRes.ok) throw new Error('Token exchange failed');
+      const tokenData = await tokenRes.json() as { access_token: string };
+
+      const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      if (!userRes.ok) throw new Error('UserInfo request failed');
+      const userInfo = await userRes.json() as { email?: string; name?: string };
+
+      if (!userInfo.email) {
+        return reply.redirect('/login?error=no_email');
+      }
+
+      const [existingUser] = await db.select().from(users).where(eq(users.email, userInfo.email)).limit(1);
+      if (existingUser) {
+        req.session.userId = existingUser.id;
+        return reply.redirect('/dashboard');
+      }
+
+      return reply.redirect(`/register?googleEmail=${encodeURIComponent(userInfo.email)}&name=${encodeURIComponent(userInfo.name ?? '')}`);
+    } catch (err) {
+      req.log.error(err, 'Google Sign-In failed');
+      return reply.redirect('/login?error=google_auth_failed');
+    }
+  });
+
+
   // ── Me ────────────────────────────────────────────────────────────────────────
 
   app.get('/api/me', async (req, reply) => {
@@ -410,15 +476,23 @@ const start = async () => {
     const oauthProvider = oauthProviders[provider];
     if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
 
+    const body = (req.body as { redirectUri?: string } | undefined) ?? {};
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const state = Buffer.from(JSON.stringify({ userId: user.id, provider })).toString('base64url');
 
+    const redirectUri = body.redirectUri ?? oauthProvider.redirectUri(baseUrl);
+
     const url = new URL(oauthProvider.authorizeUrl);
     url.searchParams.set('client_id', oauthProvider.clientId ?? '');
-    url.searchParams.set('redirect_uri', oauthProvider.redirectUri(baseUrl));
+    url.searchParams.set('redirect_uri', redirectUri);
     url.searchParams.set('scope', oauthProvider.scope);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('state', state);
+
+    if (provider === 'google-fit' || provider === 'google-health') {
+      url.searchParams.set('access_type', 'offline');
+      url.searchParams.set('prompt', 'consent');
+    }
 
     return { url: url.toString() };
   });
@@ -456,7 +530,105 @@ const start = async () => {
       await db.update(sources).set({ credentials, enabled: true, consentAt: new Date() }).where(eq(sources.id, src.id));
     }
 
+    // Auto-sync initial samples for Google Fit / Google Health
+    if (sourceKind === 'google_fit') {
+      try {
+        const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
+        for (const s of parsedSamples) {
+          await db.insert(samples).values({
+            userId, sourceId: src.id,
+            metric: s.metric, value: s.value, unit: s.unit,
+            measuredAt: new Date(s.measuredAt),
+          }).onConflictDoNothing();
+        }
+        await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      } catch (err) {
+        req.log.warn(err, 'Initial Google sync after OAuth callback failed');
+      }
+    }
+
+    const acceptsHtml = req.headers.accept?.includes('text/html');
+    if (acceptsHtml) {
+      return reply.redirect('/daten?connected=' + encodeURIComponent(provider));
+    }
+
     return reply.status(200).send({ ok: true, sourceId: src.id });
+  });
+
+  // Manual code exchange endpoint (for Codelab redirect_uri=https://www.google.com or manual code entry)
+  app.post('/api/sources/:provider/exchange', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { provider } = req.params as { provider: string };
+    const oauthProvider = oauthProviders[provider];
+    if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+
+    const body = req.body as { code?: string; redirectUri?: string } | undefined;
+    let code = body?.code?.trim();
+    if (!code) return reply.status(400).send({ title: 'Code erforderlich.' });
+
+    // Handle user pasting complete callback URL (e.g. https://www.google.com/?code=4/0A...)
+    if (code.includes('code=')) {
+      try {
+        const parsedUrl = new URL(code.startsWith('http') ? code : `https://${code}`);
+        const parsedCode = parsedUrl.searchParams.get('code');
+        if (parsedCode) code = parsedCode;
+      } catch {
+        // use raw code string
+      }
+    }
+
+    const sourceKind = providerToSourceKind(provider);
+    if (!sourceKind) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const redirectUri = body?.redirectUri ?? (provider === 'google-fit' || provider === 'google-health' ? 'https://www.google.com' : oauthProvider.redirectUri(baseUrl));
+
+    let credentials;
+    try {
+      credentials = await exchangeCodeForToken(oauthProvider, code, baseUrl, redirectUri);
+    } catch {
+      // If provided redirectUri failed, try with provider's configured redirectUri as fallback
+      try {
+        credentials = await exchangeCodeForToken(oauthProvider, code, baseUrl, oauthProvider.redirectUri(baseUrl));
+      } catch {
+        return reply.status(400).send({ title: 'Ungültiger Autorisierungscode oder abgelaufenes Token.' });
+      }
+    }
+
+    let [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, sourceKind)))
+      .limit(1);
+
+    if (!src) {
+      [src] = await db.insert(sources).values({
+        userId: user.id, kind: sourceKind, adapter: provider,
+        enabled: true, consentAt: new Date(), credentials,
+      }).returning();
+    } else {
+      await db.update(sources).set({ credentials, enabled: true, consentAt: new Date() }).where(eq(sources.id, src.id));
+    }
+
+    let inserted = 0;
+    if (sourceKind === 'google_fit') {
+      try {
+        const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
+        for (const s of parsedSamples) {
+          await db.insert(samples).values({
+            userId: user.id, sourceId: src.id,
+            metric: s.metric, value: s.value, unit: s.unit,
+            measuredAt: new Date(s.measuredAt),
+          }).onConflictDoNothing();
+          inserted++;
+        }
+        await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      } catch (err) {
+        req.log.warn(err, 'Initial Google sync after manual exchange failed');
+      }
+    }
+
+    return reply.status(200).send({ ok: true, sourceId: src.id, inserted });
   });
 
   app.delete('/api/sources/:id/disconnect', async (req, reply) => {
