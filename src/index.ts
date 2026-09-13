@@ -76,13 +76,24 @@ async function requireUser(req: FastifyRequest, reply: FastifyReply) {
 }
 
 async function getUserSamples(userId: string): Promise<Sample[]> {
-  const rows = await db.select().from(samples).where(eq(samples.userId, userId));
+  const rows = await db
+    .select({
+      metric: samples.metric,
+      value: samples.value,
+      unit: samples.unit,
+      measuredAt: samples.measuredAt,
+      sourceKind: sources.kind,
+    })
+    .from(samples)
+    .innerJoin(sources, eq(samples.sourceId, sources.id))
+    .where(and(eq(samples.userId, userId), eq(sources.enabled, true)));
+
   return rows.map(r => ({
     metric: r.metric as Sample['metric'],
     value: r.value,
     unit: r.unit,
     measuredAt: r.measuredAt.toISOString(),
-    sourceKind: 'apple_health' as Sample['sourceKind'],
+    sourceKind: (r.sourceKind ?? 'apple_health') as Sample['sourceKind'],
   }));
 }
 
@@ -494,8 +505,8 @@ const start = async () => {
         sourceAdapter: sources.adapter,
       })
       .from(samples)
-      .leftJoin(sources, eq(samples.sourceId, sources.id))
-      .where(eq(samples.userId, user.id))
+      .innerJoin(sources, eq(samples.sourceId, sources.id))
+      .where(and(eq(samples.userId, user.id), eq(sources.enabled, true)))
       .orderBy(desc(samples.measuredAt))
       .limit(5000);
 
@@ -582,6 +593,10 @@ const start = async () => {
     await db.update(sources)
       .set({ enabled: body.enabled, consentAt: body.enabled ? new Date() : null })
       .where(eq(sources.id, id));
+
+    const today = new Date().toISOString().slice(0, 10);
+    await db.delete(scoreSnapshots)
+      .where(and(eq(scoreSnapshots.userId, user.id), eq(scoreSnapshots.computedFor, today)));
 
     return reply.status(204).send();
   });
@@ -852,17 +867,45 @@ const start = async () => {
     if (!user) return;
 
     const { id } = req.params as { id: string };
+    const query = req.query as { deleteData?: string } | undefined;
+    const shouldDeleteData = query?.deleteData === 'true' || query?.deleteData === '1';
+
     const [source] = await db.select().from(sources)
       .where(and(eq(sources.id, id), eq(sources.userId, user.id)))
       .limit(1);
 
     if (!source) return reply.status(404).send({ title: 'Quelle nicht gefunden.' });
 
-    if (source.adapter === 'mock') {
+    if (source.adapter === 'mock' || shouldDeleteData) {
       await db.delete(samples).where(and(eq(samples.sourceId, id), eq(samples.userId, user.id)));
     }
 
     await db.update(sources).set({ credentials: null, enabled: false }).where(eq(sources.id, id));
+
+    const today = new Date().toISOString().slice(0, 10);
+    await db.delete(scoreSnapshots)
+      .where(and(eq(scoreSnapshots.userId, user.id), eq(scoreSnapshots.computedFor, today)));
+
+    return reply.status(204).send();
+  });
+
+  app.delete('/api/sources/:id/samples', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { id } = req.params as { id: string };
+    const [source] = await db.select().from(sources)
+      .where(and(eq(sources.id, id), eq(sources.userId, user.id)))
+      .limit(1);
+
+    if (!source) return reply.status(404).send({ title: 'Quelle nicht gefunden.' });
+
+    await db.delete(samples).where(and(eq(samples.sourceId, id), eq(samples.userId, user.id)));
+    await db.update(sources).set({ lastSyncAt: null }).where(eq(sources.id, id));
+
+    const today = new Date().toISOString().slice(0, 10);
+    await db.delete(scoreSnapshots)
+      .where(and(eq(scoreSnapshots.userId, user.id), eq(scoreSnapshots.computedFor, today)));
 
     return reply.status(204).send();
   });
