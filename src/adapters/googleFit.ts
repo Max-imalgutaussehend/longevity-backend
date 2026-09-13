@@ -155,13 +155,18 @@ async function fetchGoogleHealthV4Samples(accessToken: string): Promise<Sample[]
       const res = await fetch(`https://health.googleapis.com/v4/users/me/dataTypes/${dt}/dataPoints?pageSize=100`, {
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       });
-      if (!res.ok) continue;
-      const data = await res.json() as { dataPoints?: GoogleHealthDataPoint[] };
-      if (data.dataPoints) {
-        samples.push(...parseGoogleHealthV4DataPoints(dt, data.dataPoints));
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        console.warn(`[GoogleHealthV4] ${dt} returned HTTP ${res.status}: ${text.slice(0, 150)}`);
+        continue;
       }
-    } catch {
-      // Continue to next data type or fallback
+      const data = await res.json() as { dataPoints?: GoogleHealthDataPoint[]; points?: GoogleHealthDataPoint[] };
+      const rawPoints = data.dataPoints ?? data.points;
+      if (rawPoints && Array.isArray(rawPoints)) {
+        samples.push(...parseGoogleHealthV4DataPoints(dt, rawPoints));
+      }
+    } catch (err) {
+      console.warn(`[GoogleHealthV4] ${dt} fetch error:`, err);
     }
   }
 

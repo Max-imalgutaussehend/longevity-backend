@@ -666,6 +666,23 @@
         }
       }
     },
+    "/samples/summary": {
+      "get": {
+        "operationId": "getSamplesSummary",
+        "tags": [
+          "Samples"
+        ],
+        "summary": "Get synchronized metrics summary and recent samples",
+        "responses": {
+          "200": {
+            "description": "SamplesSummaryResponse"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
     "/sources/{id}": {
       "patch": {
         "operationId": "patchSource",

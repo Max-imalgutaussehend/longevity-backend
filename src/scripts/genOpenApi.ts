@@ -83,6 +83,11 @@ paths['/sources'] = {
     responses: { 200: { description: 'Source[]', content: { 'application/json': { schema: { type: 'array', items: ref('Source') } } } }, ...auth401 } },
 };
 
+paths['/samples/summary'] = {
+  get: { operationId: 'getSamplesSummary', tags: ['Samples'], summary: 'Get synchronized metrics summary and recent samples',
+    responses: { 200: { description: 'SamplesSummaryResponse' }, ...auth401 } },
+};
+
 paths['/sources/{id}'] = {
   patch: { operationId: 'patchSource', tags: ['Sources'], summary: 'Enable/disable source',
     parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],

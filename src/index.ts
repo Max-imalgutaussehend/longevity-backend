@@ -10,9 +10,36 @@ import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots } f
 import { eq, desc, and, gte, asc } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
 import { computeScore, simulate, suggestLevers } from './score/index.js';
+import { METRICS } from './score/metrics.js';
 import { generate } from './mock/generate.js';
 import { isWeakPassword } from './lib/weakPasswords.js';
 import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
+
+const METRIC_LABELS: Record<string, string> = {
+  vo2max: 'VO₂max',
+  resting_hr: 'Ruhepuls',
+  systolic_bp: 'Systol. Blutdruck',
+  ldl: 'LDL-Cholesterin',
+  hdl: 'HDL-Cholesterin',
+  hba1c: 'HbA1c',
+  waist: 'Taillenumfang',
+  sleep_duration: 'Schlafdauer',
+  sleep_consistency: 'Schlafkonsistenz',
+  hrv_rmssd: 'HRV (RMSSD)',
+  zone2_minutes: 'Zone-2-Minuten',
+  steps: 'Schritte',
+  strength_sessions: 'Krafteinheiten',
+  smoking: 'Rauchen',
+  alcohol_units: 'Alkohol',
+  hscrp: 'hsCRP',
+};
+
+const DOMAIN_LABELS: Record<string, string> = {
+  cardiometabolic: 'Kardiometabolik',
+  recovery: 'Regeneration',
+  activity: 'Aktivität',
+  risk: 'Risiko',
+};
 import { PgSessionStore } from './lib/pgSessionStore.js';
 import { parseAppleHealthXml } from './adapters/appleHealth.js';
 import { parseHealthAutoExport } from './adapters/healthAutoExport.js';
@@ -25,7 +52,7 @@ import { fetchOuraSamples } from './adapters/oura.js';
 import { fetchStravaSamples } from './adapters/strava.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { Sample } from './score/types.js';
+import type { Sample, Metric } from './score/types.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
 declare module 'fastify' {
@@ -82,6 +109,18 @@ const start = async () => {
       maxAge: 30 * 24 * 60 * 60 * 1000,
     },
     saveUninitialized: false,
+  });
+
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    if (typeof body !== 'string' || body.trim() === '') {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(body));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
   });
 
   // ── OpenAPI spec ──────────────────────────────────────────────────────────────
@@ -411,6 +450,82 @@ const start = async () => {
       lastSyncAt: s.lastSyncAt?.toISOString() ?? null,
       sampleCount: countMap.get(s.id) ?? 0,
     }));
+  });
+
+  app.get('/api/samples/summary', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const rawSamples = await db
+      .select({
+        id: samples.id,
+        metric: samples.metric,
+        value: samples.value,
+        unit: samples.unit,
+        measuredAt: samples.measuredAt,
+        createdAt: samples.createdAt,
+        sourceKind: sources.kind,
+        sourceAdapter: sources.adapter,
+      })
+      .from(samples)
+      .leftJoin(sources, eq(samples.sourceId, sources.id))
+      .where(eq(samples.userId, user.id))
+      .orderBy(desc(samples.measuredAt))
+      .limit(500);
+
+    const metricDefs = new Map(METRICS.map(m => [m.metric, m]));
+    const byMetric = new Map<string, typeof rawSamples>();
+    for (const s of rawSamples) {
+      const list = byMetric.get(s.metric) ?? [];
+      list.push(s);
+      byMetric.set(s.metric, list);
+    }
+
+    const metricsSummary = Array.from(byMetric.entries()).map(([metric, list]) => {
+      const latest = list[0];
+      const def = metricDefs.get(metric as Metric);
+      const label = METRIC_LABELS[metric] ?? metric;
+      const domain = def?.domain ?? 'activity';
+      const domainLabel = DOMAIN_LABELS[domain] ?? domain;
+
+      return {
+        metric,
+        label,
+        domain,
+        domainLabel,
+        latestValue: latest.value,
+        unit: latest.unit,
+        latestMeasuredAt: latest.measuredAt.toISOString(),
+        sourceKind: latest.sourceKind ?? 'manual',
+        sourceAdapter: latest.sourceAdapter ?? null,
+        count: list.length,
+        history: list.slice(0, 30).map(item => ({
+          id: Number(item.id),
+          value: item.value,
+          measuredAt: item.measuredAt.toISOString(),
+          sourceKind: item.sourceKind ?? 'manual',
+        })),
+      };
+    });
+
+    metricsSummary.sort((a, b) => new Date(b.latestMeasuredAt).getTime() - new Date(a.latestMeasuredAt).getTime());
+
+    const recentSamples = rawSamples.slice(0, 100).map(s => ({
+      id: Number(s.id),
+      metric: s.metric,
+      label: METRIC_LABELS[s.metric] ?? s.metric,
+      value: s.value,
+      unit: s.unit,
+      measuredAt: s.measuredAt.toISOString(),
+      sourceKind: s.sourceKind ?? 'manual',
+      sourceAdapter: s.sourceAdapter ?? null,
+    }));
+
+    return {
+      metrics: metricsSummary,
+      recentSamples,
+      totalCount: rawSamples.length,
+    };
   });
 
   app.patch('/api/sources/:id', async (req, reply) => {
