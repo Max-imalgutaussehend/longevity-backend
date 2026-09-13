@@ -147,9 +147,18 @@ paths['/sources/{provider}/exchange'] = {
 
 
 paths['/sources/{id}/disconnect'] = {
-  delete: { operationId: 'disconnectSource', tags: ['Sources'], summary: 'Remove OAuth credentials, keep samples',
-    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+  delete: { operationId: 'disconnectSource', tags: ['Sources'], summary: 'Remove OAuth credentials, keep samples unless deleteData is true',
+    parameters: [
+      { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+      { name: 'deleteData', in: 'query', required: false, schema: { type: 'boolean' } },
+    ],
     responses: { 204: { description: 'Disconnected' }, 404: { description: 'Not found' }, ...auth401 } },
+};
+
+paths['/sources/{id}/samples'] = {
+  delete: { operationId: 'deleteSourceSamples', tags: ['Sources'], summary: 'Delete all samples for a source',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: { 204: { description: 'Samples deleted' }, 404: { description: 'Not found' }, ...auth401 } },
 };
 
 paths['/sources/withings/sync'] = {
