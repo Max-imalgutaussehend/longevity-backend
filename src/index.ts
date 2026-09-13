@@ -42,6 +42,7 @@ const DOMAIN_LABELS: Record<string, string> = {
 };
 import { PgSessionStore } from './lib/pgSessionStore.js';
 import { parseAppleHealthXml } from './adapters/appleHealth.js';
+import { looksLikeZip, extractExportXml, AppleHealthZipError } from './adapters/appleHealthZip.js';
 import { parseHealthAutoExport } from './adapters/healthAutoExport.js';
 import { parseFhirBundle } from './adapters/fhir.js';
 import { exchangeCodeForToken, getValidToken } from './lib/oauthTokens.js';
@@ -51,6 +52,7 @@ import { fetchGoogleFitSamples } from './adapters/googleFit.js';
 import { fetchOuraSamples } from './adapters/oura.js';
 import { fetchStravaSamples } from './adapters/strava.js';
 import { readFileSync, existsSync } from 'node:fs';
+import { Readable } from 'node:stream';
 import { resolve } from 'node:path';
 import type { Sample, Metric } from './score/types.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
@@ -130,7 +132,7 @@ const start = async () => {
   });
 
   await app.register(rateLimit, { global: false });
-  await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024 } }); // 200 MB cap for AH exports
+  await app.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } }); // 500 MB cap for AH exports (ZIP or raw XML)
 
   await app.register(cookie);
   await app.register(session, {
@@ -1337,7 +1339,29 @@ const start = async () => {
     const data = await req.file();
     if (!data) return reply.status(400).send({ title: 'Keine Datei hochgeladen.' });
 
-    const parsedSamples = await parseAppleHealthXml(data.file, { birthDate: user.birthDate });
+    // Buffered (not streamed to disk) since ZIP central-directory parsing needs
+    // random access; the 500 MB multipart limit bounds per-request memory use.
+    const buffer = await data.toBuffer();
+
+    let xmlStream: Readable;
+    if (looksLikeZip(buffer)) {
+      try {
+        xmlStream = await extractExportXml(buffer);
+      } catch (err) {
+        const message = err instanceof AppleHealthZipError ? err.message : 'Das ZIP-Archiv konnte nicht verarbeitet werden.';
+        return reply.status(400).send({ title: message });
+      }
+    } else {
+      xmlStream = Readable.from(buffer);
+    }
+
+    const parsedSamples = await parseAppleHealthXml(xmlStream, { birthDate: user.birthDate });
+
+    if (parsedSamples.length === 0) {
+      return reply.status(400).send({
+        title: 'Keine bekannten Apple-Health-Metriken in der Datei gefunden. Bitte export.xml oder das vollständige ZIP-Archiv aus der Health-App hochladen.',
+      });
+    }
 
     let [src] = await db.select().from(sources)
       .where(and(eq(sources.userId, user.id), eq(sources.kind, 'apple_health')))
