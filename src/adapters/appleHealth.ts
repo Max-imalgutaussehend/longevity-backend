@@ -130,7 +130,7 @@ export async function parseAppleHealthXml(stream: Readable, options?: AppleHealt
   function trackSleepOnset(startDateStr: string) {
     const m = /(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(startDateStr);
     if (!m) return;
-    const [_, y, mo, d, hStr, minStr] = m;
+    const [, y, mo, d, hStr, minStr] = m;
     const hour = parseInt(hStr, 10);
     const minute = parseInt(minStr, 10);
 
