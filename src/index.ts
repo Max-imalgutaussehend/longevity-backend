@@ -248,7 +248,7 @@ const start = async () => {
     const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
     if (!googleClientId) return { url: null };
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
-    const redirectUri = env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/auth/google/callback`;
+    const redirectUri = (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/auth/google/callback`;
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', googleClientId);
     url.searchParams.set('redirect_uri', redirectUri);
@@ -267,7 +267,7 @@ const start = async () => {
     }
 
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
-    const redirectUri = env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/auth/google/callback`;
+    const redirectUri = (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/auth/google/callback`;
 
     try {
       const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -662,8 +662,7 @@ const start = async () => {
     const body = (req.body as { redirectUri?: string } | undefined) ?? {};
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const state = Buffer.from(JSON.stringify({ userId: user.id, provider })).toString('base64url');
-
-    const redirectUri = body.redirectUri ?? oauthProvider.redirectUri(baseUrl);
+    const redirectUri = (body.redirectUri && body.redirectUri.trim()) || oauthProvider.redirectUri(baseUrl);
 
     const url = new URL(oauthProvider.authorizeUrl);
     url.searchParams.set('client_id', oauthProvider.clientId ?? '');
@@ -747,7 +746,7 @@ const start = async () => {
     }
 
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
-    const redirectUri = env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/sources/google/callback`;
+    const redirectUri = (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/sources/google/callback`;
     const credentials = await exchangeCodeForToken(oauthProvider, code, baseUrl, redirectUri);
 
     let [src] = await db.select().from(sources)

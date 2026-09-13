@@ -27,7 +27,7 @@ export const oauthProviders: Record<string, OAuthProvider> = {
     clientId: googleClientId,
     clientSecret: googleClientSecret,
     scope: googleHealthScopes,
-    redirectUri: (baseUrl) => env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/oauth/callback/google-fit`,
+    redirectUri: (baseUrl) => (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/oauth/callback/google-fit`,
   },
   'google-health': {
     kind: 'google-health',
@@ -36,7 +36,7 @@ export const oauthProviders: Record<string, OAuthProvider> = {
     clientId: googleClientId,
     clientSecret: googleClientSecret,
     scope: googleHealthScopes,
-    redirectUri: (baseUrl) => env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/oauth/callback/google-fit`,
+    redirectUri: (baseUrl) => (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/oauth/callback/google-fit`,
   },
   oura: {
     kind: 'oura',
