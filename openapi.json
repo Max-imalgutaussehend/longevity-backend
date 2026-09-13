@@ -171,6 +171,9 @@
           "enabled": {
             "type": "boolean"
           },
+          "connected": {
+            "type": "boolean"
+          },
           "lastSyncAt": {
             "type": [
               "string",
@@ -1100,6 +1103,26 @@
           "Sources"
         ],
         "summary": "Pull latest steps/HR/sleep/active-minutes from Google Fit",
+        "responses": {
+          "200": {
+            "description": "Inserted count"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not connected"
+          }
+        }
+      }
+    },
+    "/sources/google-health/sync": {
+      "post": {
+        "operationId": "syncGoogleHealth",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Pull latest steps/HR/sleep/active-minutes from Google Health",
         "responses": {
           "200": {
             "description": "Inserted count"

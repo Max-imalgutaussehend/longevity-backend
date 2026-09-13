@@ -171,6 +171,12 @@ paths['/sources/google-fit/sync'] = {
     responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
 };
 
+paths['/sources/google-health/sync'] = {
+  post: { operationId: 'syncGoogleHealth', tags: ['Sources'], summary: 'Pull latest steps/HR/sleep/active-minutes from Google Health',
+    responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
+};
+
+
 paths['/sources/oura/sync'] = {
   post: { operationId: 'syncOura', tags: ['Sources'], summary: 'Pull latest sleep/readiness/activity from Oura',
     responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
@@ -268,8 +274,9 @@ const schemas: Record<string, unknown> = {
   } },
   Source: { type: 'object', properties: {
     id: { type: 'string', format: 'uuid' }, kind: { type: 'string' }, adapter: { type: 'string' },
-    enabled: { type: 'boolean' }, lastSyncAt: { type: ['string', 'null'], format: 'date-time' }, sampleCount: { type: 'integer' },
+    enabled: { type: 'boolean' }, connected: { type: 'boolean' }, lastSyncAt: { type: ['string', 'null'], format: 'date-time' }, sampleCount: { type: 'integer' },
   } },
+
   ShareToken: { type: 'object', properties: {
     id: { type: 'string' }, bandLow: { type: 'integer' }, bandHigh: { type: 'integer' },
     issuedAt: { type: 'string', format: 'date-time' }, expiresAt: { type: 'string', format: 'date-time' },
