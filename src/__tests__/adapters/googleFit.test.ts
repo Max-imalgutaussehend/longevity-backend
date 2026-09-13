@@ -113,5 +113,83 @@ describe('parseGoogleHealthV4DataPoints', () => {
       unit: 'min',
     });
   });
+
+  it('aggregates multiple step interval data points per day into a single daily total', () => {
+    const samples = parseGoogleHealthV4DataPoints('steps', [
+      {
+        steps: {
+          count: '1500',
+          interval: {
+            startTime: '2026-09-13T08:00:00Z',
+            endTime: '2026-09-13T08:30:00Z',
+            civilStartTime: { date: { year: 2026, month: 9, day: 13 } },
+          },
+        },
+      },
+      {
+        steps: {
+          count: '3200',
+          interval: {
+            startTime: '2026-09-13T12:00:00Z',
+            endTime: '2026-09-13T13:00:00Z',
+            civilStartTime: { date: { year: 2026, month: 9, day: 13 } },
+          },
+        },
+      },
+      {
+        steps: {
+          count: '8000',
+          interval: {
+            startTime: '2026-09-12T10:00:00Z',
+            endTime: '2026-09-12T11:00:00Z',
+            civilStartTime: { date: { year: 2026, month: 9, day: 12 } },
+          },
+        },
+      },
+    ]);
+
+    expect(samples).toHaveLength(2);
+    const day13 = samples.find(s => s.measuredAt.startsWith('2026-09-13'));
+    const day12 = samples.find(s => s.measuredAt.startsWith('2026-09-12'));
+    expect(day13?.value).toBe(4700);
+    expect(day12?.value).toBe(8000);
+  });
+
+  it('parses strength exercise into strength_sessions', () => {
+    const samples = parseGoogleHealthV4DataPoints('exercise', [
+      {
+        exercise: {
+          exerciseType: 'WEIGHTLIFTING',
+          displayName: 'Krafttraining',
+          interval: { startTime: '2026-09-13T14:00:00Z', endTime: '2026-09-13T15:00:00Z' },
+        },
+      },
+    ]);
+    expect(samples).toHaveLength(1);
+    expect(samples[0]).toMatchObject({
+      metric: 'strength_sessions',
+      value: 1,
+      unit: '/week',
+    });
+  });
+
+  it('parses exercise with activeDuration into zone2_minutes', () => {
+    const samples = parseGoogleHealthV4DataPoints('exercise', [
+      {
+        exercise: {
+          exerciseType: 'WALKING',
+          displayName: 'Gehen',
+          activeDuration: '1800s', // 30 min
+          interval: { startTime: '2026-09-13T16:00:00Z', endTime: '2026-09-13T16:30:00Z' },
+        },
+      },
+    ]);
+    expect(samples).toHaveLength(1);
+    expect(samples[0]).toMatchObject({
+      metric: 'zone2_minutes',
+      value: 30,
+      unit: 'min',
+    });
+  });
 });
 

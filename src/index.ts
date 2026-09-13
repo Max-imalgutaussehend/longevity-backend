@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { env } from './env.js';
 import { db } from './db/client.js';
 import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots } from './db/schema.js';
-import { eq, desc, and, gte, asc } from 'drizzle-orm';
+import { eq, desc, and, gte, asc, sql } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
 import { computeScore, simulate, suggestLevers } from './score/index.js';
 import { METRICS } from './score/metrics.js';
@@ -84,6 +84,32 @@ async function getUserSamples(userId: string): Promise<Sample[]> {
     measuredAt: r.measuredAt.toISOString(),
     sourceKind: 'apple_health' as Sample['sourceKind'],
   }));
+}
+
+async function upsertGoogleFitSamples(userId: string, sourceId: string, parsedSamples: Sample[]): Promise<number> {
+  if (parsedSamples.length === 0) return 0;
+  // Clean up previous raw/fragmented samples for this source to ensure pristine daily history
+  await db.delete(samples).where(eq(samples.sourceId, sourceId));
+
+  const chunkSize = 200;
+  for (let i = 0; i < parsedSamples.length; i += chunkSize) {
+    const chunk = parsedSamples.slice(i, i + chunkSize);
+    await db.insert(samples).values(chunk.map(s => ({
+      userId,
+      sourceId,
+      metric: s.metric,
+      value: s.value,
+      unit: s.unit,
+      measuredAt: new Date(s.measuredAt),
+    }))).onConflictDoUpdate({
+      target: [samples.userId, samples.metric, samples.measuredAt],
+      set: {
+        value: sql`EXCLUDED.value`,
+        unit: sql`EXCLUDED.unit`,
+      },
+    });
+  }
+  return parsedSamples.length;
 }
 
 const start = async () => {
@@ -471,7 +497,7 @@ const start = async () => {
       .leftJoin(sources, eq(samples.sourceId, sources.id))
       .where(eq(samples.userId, user.id))
       .orderBy(desc(samples.measuredAt))
-      .limit(500);
+      .limit(5000);
 
     const metricDefs = new Map(METRICS.map(m => [m.metric, m]));
     const byMetric = new Map<string, typeof rawSamples>();
@@ -499,7 +525,7 @@ const start = async () => {
         sourceKind: latest.sourceKind ?? 'manual',
         sourceAdapter: latest.sourceAdapter ?? null,
         count: list.length,
-        history: list.slice(0, 30).map(item => ({
+        history: list.slice(0, 90).map(item => ({
           id: Number(item.id),
           value: item.value,
           measuredAt: item.measuredAt.toISOString(),
@@ -521,10 +547,18 @@ const start = async () => {
       sourceAdapter: s.sourceAdapter ?? null,
     }));
 
+    let minDate: string | null = null;
+    let maxDate: string | null = null;
+    if (rawSamples.length > 0) {
+      maxDate = rawSamples[0].measuredAt.toISOString();
+      minDate = rawSamples[rawSamples.length - 1].measuredAt.toISOString();
+    }
+
     return {
       metrics: metricsSummary,
       recentSamples,
       totalCount: rawSamples.length,
+      dateRange: minDate && maxDate ? { min: minDate, max: maxDate } : null,
     };
   });
 
@@ -649,13 +683,7 @@ const start = async () => {
     if (sourceKind === 'google_fit') {
       try {
         const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
-        for (const s of parsedSamples) {
-          await db.insert(samples).values({
-            userId, sourceId: src.id,
-            metric: s.metric, value: s.value, unit: s.unit,
-            measuredAt: new Date(s.measuredAt),
-          }).onConflictDoNothing();
-        }
+        await upsertGoogleFitSamples(userId, src.id, parsedSamples);
         await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
       } catch (err) {
         req.log.warn(err, 'Initial Google sync after OAuth callback failed');
@@ -729,14 +757,7 @@ const start = async () => {
     if (sourceKind === 'google_fit') {
       try {
         const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
-        for (const s of parsedSamples) {
-          await db.insert(samples).values({
-            userId: user.id, sourceId: src.id,
-            metric: s.metric, value: s.value, unit: s.unit,
-            measuredAt: new Date(s.measuredAt),
-          }).onConflictDoNothing();
-          inserted++;
-        }
+        inserted = await upsertGoogleFitSamples(user.id, src.id, parsedSamples);
         await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
       } catch (err) {
         req.log.warn(err, 'Initial Google sync after manual exchange failed');
@@ -806,16 +827,7 @@ const start = async () => {
 
     const accessToken = await getValidToken(src.id, oauthProviders['google-fit']);
     const parsedSamples = await fetchGoogleFitSamples(accessToken);
-
-    let inserted = 0;
-    for (const s of parsedSamples) {
-      await db.insert(samples).values({
-        userId: user.id, sourceId: src.id,
-        metric: s.metric, value: s.value, unit: s.unit,
-        measuredAt: new Date(s.measuredAt),
-      }).onConflictDoNothing();
-      inserted++;
-    }
+    const inserted = await upsertGoogleFitSamples(user.id, src.id, parsedSamples);
 
     await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
 
