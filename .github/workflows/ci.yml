@@ -49,7 +49,9 @@ jobs:
 
       - name: Notify superprojekt
         if: success() && github.ref == 'refs/heads/main'
+        continue-on-error: true
         run: |
+          if [ -z "$GH_TOKEN" ]; then echo "GH_SUBMODULE_TOKEN not configured in repo secrets, skipping dispatch"; exit 0; fi
           gh api repos/Max-imalgutaussehend/LONGEVITY/dispatches \
             --field event_type=submodule-updated \
             --field "client_payload[repo]=backend"
