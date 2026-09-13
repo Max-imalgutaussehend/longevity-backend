@@ -181,18 +181,22 @@ export function suggestLevers(input: ScoreInput): Lever[] {
       const sample = input.samples.find(s => s.metric === def.metric);
       const currentValue = sample?.value ?? null;
 
+      // A lever without any real measurement isn't a recommendation — it's a
+      // cohort-mean guess. Only 'smoking' has a deliberate no-data default
+      // (assume current smoker) since that default is itself informative.
+      if (currentValue === null && def.metric !== 'smoking') return null;
+
       let targetValue: number;
       if (def.metric === 'smoking') {
         const current = currentValue ?? 3; // default to current smoker
         targetValue = Math.max(0, current - 1);
       } else {
+        // currentValue is guaranteed non-null here by the guard above.
         const ref = REFERENCE[def.metric];
         if (!ref) return null;
-        const age = ageYears(input.profile.birthDate, now);
-        const mu = ref.mu(age, input.profile.sex);
         const sigma = ref.sigma(input.profile.sex);
         const improvement = def.dir === 'higher' ? 0.5 * sigma : -0.5 * sigma;
-        targetValue = (currentValue ?? mu) + improvement;
+        targetValue = (currentValue as number) + improvement;
       }
 
       const sim = computeScore({
