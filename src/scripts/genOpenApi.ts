@@ -129,6 +129,15 @@ paths['/oauth/callback/{provider}'] = {
     responses: { 200: { description: 'Connected' }, 400: { description: 'Missing/invalid params' }, 404: { description: 'Unknown provider' } } },
 };
 
+paths['/sources/google/callback'] = {
+  get: { operationId: 'googleSourcesCallback', tags: ['Sources'], summary: 'Alias for Google OAuth redirect callback',
+    parameters: [
+      { name: 'code', in: 'query', required: true, schema: { type: 'string' } },
+      { name: 'state', in: 'query', required: true, schema: { type: 'string' } },
+    ],
+    responses: { 200: { description: 'Connected' }, 400: { description: 'Missing/invalid params' }, 404: { description: 'Unknown provider' } } },
+};
+
 paths['/sources/{provider}/exchange'] = {
   post: { operationId: 'exchangeSourceCode', tags: ['Sources'], summary: 'Exchange OAuth code manually for tokens and sync initial data',
     parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string', enum: ['withings', 'google-fit', 'google-health', 'oura', 'strava'] } }],

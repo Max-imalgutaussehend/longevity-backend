@@ -732,6 +732,53 @@ const start = async () => {
     return reply.status(200).send({ ok: true, sourceId: src.id });
   });
 
+  // Alias for Google OAuth callback if registered as /api/sources/google/callback
+  app.get('/api/sources/google/callback', async (req, reply) => {
+    const { code, state } = req.query as { code?: string; state?: string };
+    const oauthProvider = oauthProviders['google-fit'];
+    if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+    if (!code || !state) return reply.status(400).send({ title: 'code oder state fehlt.' });
+
+    let userId: string;
+    try {
+      ({ userId } = JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as { userId: string });
+    } catch {
+      return reply.status(400).send({ title: 'Ungültiger state-Parameter.' });
+    }
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const redirectUri = env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/sources/google/callback`;
+    const credentials = await exchangeCodeForToken(oauthProvider, code, baseUrl, redirectUri);
+
+    let [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, userId), eq(sources.kind, 'google_fit')))
+      .limit(1);
+
+    if (!src) {
+      [src] = await db.insert(sources).values({
+        userId, kind: 'google_fit', adapter: 'google-fit',
+        enabled: true, consentAt: new Date(), credentials,
+      }).returning();
+    } else {
+      await db.update(sources).set({ credentials, enabled: true, consentAt: new Date() }).where(eq(sources.id, src.id));
+    }
+
+    try {
+      const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
+      await upsertGoogleFitSamples(userId, src.id, parsedSamples);
+      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+    } catch (err) {
+      req.log.warn(err, 'Initial Google sync after OAuth callback failed');
+    }
+
+    const acceptsHtml = req.headers.accept?.includes('text/html');
+    if (acceptsHtml) {
+      return reply.redirect('/daten?connected=google-fit');
+    }
+
+    return reply.status(200).send({ ok: true, sourceId: src.id });
+  });
+
   // Manual code exchange endpoint (for Codelab redirect_uri=https://www.google.com or manual code entry)
   app.post('/api/sources/:provider/exchange', async (req, reply) => {
     const user = await requireUser(req, reply);
