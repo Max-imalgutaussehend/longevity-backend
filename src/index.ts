@@ -610,9 +610,43 @@ const start = async () => {
       })));
     }
 
-    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, id));
+    await db.update(sources).set({ lastSyncAt: new Date(), enabled: true }).where(eq(sources.id, id));
 
     return { ok: true, sampleCount: newSamples.length };
+  });
+
+  app.post('/api/sources/mock/generate', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    let [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.adapter, 'mock')))
+      .limit(1);
+
+    if (!src) {
+      [src] = await db.insert(sources).values({
+        userId: user.id,
+        kind: 'apple_health',
+        adapter: 'mock',
+        enabled: true,
+      }).returning();
+    } else {
+      await db.update(sources).set({ enabled: true, lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+    }
+
+    await db.delete(samples).where(and(eq(samples.sourceId, src.id), eq(samples.userId, user.id)));
+
+    const seed = user.id.charCodeAt(0) * 31 + Date.now() % 1000;
+    const newSamples = generate(seed, 90);
+    if (newSamples.length > 0) {
+      await db.insert(samples).values(newSamples.map(s => ({
+        userId: user.id, sourceId: src.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      })));
+    }
+
+    return { ok: true, sourceId: src.id, sampleCount: newSamples.length };
   });
 
   // ── Generic OAuth (Issue #30 — Fundament für Withings/Google Fit/Oura/Strava) ───
@@ -777,6 +811,10 @@ const start = async () => {
       .limit(1);
 
     if (!source) return reply.status(404).send({ title: 'Quelle nicht gefunden.' });
+
+    if (source.adapter === 'mock') {
+      await db.delete(samples).where(and(eq(samples.sourceId, id), eq(samples.userId, user.id)));
+    }
 
     await db.update(sources).set({ credentials: null, enabled: false }).where(eq(sources.id, id));
 
