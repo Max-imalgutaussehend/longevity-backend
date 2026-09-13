@@ -34,6 +34,18 @@ paths['/auth/logout'] = {
   post: { operationId: 'logout', tags: ['Auth'], summary: 'Logout', responses: { 204: { description: 'OK' } } },
 };
 
+paths['/auth/google/url'] = {
+  post: { operationId: 'getGoogleAuthUrl', tags: ['Auth'], security: publicSecurity, summary: 'Get Google OAuth login URL',
+    responses: { 200: { description: 'Google Auth URL', content: { 'application/json': { schema: { type: 'object', properties: { url: { type: 'string', nullable: true } } } } } } } },
+};
+
+paths['/auth/google/callback'] = {
+  get: { operationId: 'googleAuthCallback', tags: ['Auth'], security: publicSecurity, summary: 'Google OAuth login callback',
+    parameters: [{ name: 'code', in: 'query', required: true, schema: { type: 'string' } }],
+    responses: { 302: { description: 'Redirect to dashboard or register' }, 400: { description: 'Auth failed' } } },
+};
+
+
 paths['/me'] = {
   get: { operationId: 'getMe', tags: ['User'], summary: 'Get current user', responses: { 200: { description: 'User object' }, ...auth401 } },
 };
@@ -69,6 +81,11 @@ paths['/score/simulate'] = {
 paths['/sources'] = {
   get: { operationId: 'getSources', tags: ['Sources'], summary: 'List data sources',
     responses: { 200: { description: 'Source[]', content: { 'application/json': { schema: { type: 'array', items: ref('Source') } } } }, ...auth401 } },
+};
+
+paths['/samples/summary'] = {
+  get: { operationId: 'getSamplesSummary', tags: ['Samples'], summary: 'Get synchronized metrics summary and recent samples',
+    responses: { 200: { description: 'SamplesSummaryResponse' }, ...auth401 } },
 };
 
 paths['/sources/{id}'] = {
@@ -111,6 +128,14 @@ paths['/oauth/callback/{provider}'] = {
     ],
     responses: { 200: { description: 'Connected' }, 400: { description: 'Missing/invalid params' }, 404: { description: 'Unknown provider' } } },
 };
+
+paths['/sources/{provider}/exchange'] = {
+  post: { operationId: 'exchangeSourceCode', tags: ['Sources'], summary: 'Exchange OAuth code manually for tokens and sync initial data',
+    parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string', enum: ['withings', 'google-fit', 'google-health', 'oura', 'strava'] } }],
+    requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['code'], properties: { code: { type: 'string' }, redirectUri: { type: 'string' } } } } } },
+    responses: { 200: { description: 'Connected and synced' }, 400: { description: 'Invalid code' }, 404: { description: 'Unknown provider' }, ...auth401 } },
+};
+
 
 paths['/sources/{id}/disconnect'] = {
   delete: { operationId: 'disconnectSource', tags: ['Sources'], summary: 'Remove OAuth credentials, keep samples',

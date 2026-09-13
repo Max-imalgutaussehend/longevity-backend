@@ -21,7 +21,13 @@ interface TokenResponse {
   scope?: string;
 }
 
-export async function exchangeCodeForToken(provider: OAuthProvider, code: string, baseUrl: string): Promise<OAuthCredentials> {
+export async function exchangeCodeForToken(
+  provider: OAuthProvider,
+  code: string,
+  baseUrl: string,
+  overrideRedirectUri?: string,
+): Promise<OAuthCredentials> {
+  const redirect_uri = overrideRedirectUri ?? provider.redirectUri(baseUrl);
   const res = await fetch(provider.tokenUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -30,7 +36,7 @@ export async function exchangeCodeForToken(provider: OAuthProvider, code: string
       code,
       client_id: provider.clientId ?? '',
       client_secret: provider.clientSecret ?? '',
-      redirect_uri: provider.redirectUri(baseUrl),
+      redirect_uri,
     }),
   });
 

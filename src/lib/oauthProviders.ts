@@ -1,6 +1,15 @@
 import { env } from '../env.js';
 import type { OAuthProvider } from './oauthTokens.js';
 
+const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
+const googleClientSecret = env.GOOGLE_FIT_CLIENT_SECRET ?? env.GOOGLE_HEALTH_CLIENT_SECRET;
+
+const googleHealthScopes = [
+  'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
+  'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
+  'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
+].join(' ');
+
 export const oauthProviders: Record<string, OAuthProvider> = {
   withings: {
     kind: 'withings',
@@ -15,14 +24,19 @@ export const oauthProviders: Record<string, OAuthProvider> = {
     kind: 'google-fit',
     authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenUrl: 'https://oauth2.googleapis.com/token',
-    clientId: env.GOOGLE_FIT_CLIENT_ID,
-    clientSecret: env.GOOGLE_FIT_CLIENT_SECRET,
-    scope: [
-      'https://www.googleapis.com/auth/fitness.heart_rate.read',
-      'https://www.googleapis.com/auth/fitness.activity.read',
-      'https://www.googleapis.com/auth/fitness.sleep.read',
-    ].join(' '),
-    redirectUri: (baseUrl) => `${baseUrl}/api/oauth/callback/google-fit`,
+    clientId: googleClientId,
+    clientSecret: googleClientSecret,
+    scope: googleHealthScopes,
+    redirectUri: (baseUrl) => env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/oauth/callback/google-fit`,
+  },
+  'google-health': {
+    kind: 'google-health',
+    authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    clientId: googleClientId,
+    clientSecret: googleClientSecret,
+    scope: googleHealthScopes,
+    redirectUri: (baseUrl) => env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/oauth/callback/google-fit`,
   },
   oura: {
     kind: 'oura',
@@ -46,8 +60,9 @@ export const oauthProviders: Record<string, OAuthProvider> = {
 
 export function providerToSourceKind(provider: string): 'withings' | 'google_fit' | 'oura' | 'strava' | null {
   if (provider === 'withings') return 'withings';
-  if (provider === 'google-fit') return 'google_fit';
+  if (provider === 'google-fit' || provider === 'google-health') return 'google_fit';
   if (provider === 'oura') return 'oura';
   if (provider === 'strava') return 'strava';
   return null;
 }
+
