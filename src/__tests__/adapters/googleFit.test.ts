@@ -191,5 +191,44 @@ describe('parseGoogleHealthV4DataPoints', () => {
       unit: 'min',
     });
   });
+
+  it('assigns past day steps to noon UTC and never in the future', () => {
+    const samples = parseGoogleHealthV4DataPoints('steps', [
+      {
+        steps: {
+          count: '5000',
+          interval: {
+            startTime: '2024-01-15T08:00:00Z',
+            endTime: '2024-01-15T20:00:00Z',
+            civilStartTime: { date: { year: 2024, month: 1, day: 15 } },
+          },
+        },
+      },
+    ]);
+    expect(samples).toHaveLength(1);
+    expect(samples[0].measuredAt).toBe('2024-01-15T12:00:00.000Z');
+    expect(new Date(samples[0].measuredAt).getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('caps future-dated aggregate points to current time', () => {
+    const farFutureNanos = String((Date.now() + 86400000) * 1_000_000);
+    const samples = parseGoogleFitAggregate({
+      bucket: [{
+        startTimeMillis: '0',
+        endTimeMillis: String(Date.now() + 86400000),
+        dataset: [{
+          dataSourceId: 'steps',
+          point: [{
+            startTimeNanos: '0',
+            endTimeNanos: farFutureNanos,
+            dataTypeName: 'com.google.step_count.delta',
+            value: [{ intVal: 1000 }],
+          }],
+        }],
+      }],
+    });
+    expect(samples).toHaveLength(1);
+    expect(new Date(samples[0].measuredAt).getTime()).toBeLessThanOrEqual(Date.now());
+  });
 });
 
