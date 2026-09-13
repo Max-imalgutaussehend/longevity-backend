@@ -52,7 +52,10 @@ export function parseGoogleFitAggregate(response: GoogleFitAggregateResponse): S
         const value = pointValue(point);
         if (value === null) continue;
 
-        const measuredAt = nanosToIso(point.endTimeNanos);
+        const endMs = Number(BigInt(point.endTimeNanos) / 1_000_000n);
+        const measuredAt = endMs > Date.now()
+          ? new Date().toISOString()
+          : nanosToIso(point.endTimeNanos);
 
         if (point.dataTypeName === DATA_TYPE_STEPS) {
           samples.push({ metric: 'steps', value, unit: 'steps', measuredAt, sourceKind: 'google_fit' });
@@ -130,12 +133,17 @@ export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: Goog
       dailyMap.set(dayStr, (dailyMap.get(dayStr) ?? 0) + count);
     }
 
+    const todayStr = new Date().toISOString().slice(0, 10);
     for (const [dayStr, totalCount] of dailyMap.entries()) {
+      const measuredAt = dayStr === todayStr
+        ? new Date().toISOString()
+        : `${dayStr}T12:00:00.000Z`;
+
       samples.push({
         metric: 'steps',
         value: totalCount,
         unit: 'steps',
-        measuredAt: `${dayStr}T23:59:59.000Z`,
+        measuredAt,
         sourceKind: 'google_fit',
       });
     }
@@ -143,7 +151,10 @@ export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: Goog
     for (const dp of dataPoints) {
       if (!dp.exercise) continue;
       const exType = (dp.exercise.exerciseType ?? '').toUpperCase();
-      const measuredAt = dp.exercise.interval?.endTime ?? dp.exercise.interval?.startTime ?? new Date().toISOString();
+      const rawMeasuredAt = dp.exercise.interval?.endTime ?? dp.exercise.interval?.startTime ?? new Date().toISOString();
+      const measuredAt = new Date(rawMeasuredAt).getTime() > Date.now()
+        ? new Date().toISOString()
+        : rawMeasuredAt;
 
       const isStrength = exType.includes('STRENGTH') || exType.includes('WEIGHT') || exType.includes('CALISTHENICS');
       if (isStrength) {
@@ -198,7 +209,10 @@ export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: Goog
       if (!dp.activeMinutes) continue;
       const levels = dp.activeMinutes.activeMinutesByActivityLevel ?? [];
       const totalMinutes = levels.reduce((acc, l) => acc + (Number(l.activeMinutes) || 0), 0);
-      const measuredAt = dp.activeMinutes.interval?.endTime ?? new Date().toISOString();
+      const rawMeasuredAt = dp.activeMinutes.interval?.endTime ?? new Date().toISOString();
+      const measuredAt = new Date(rawMeasuredAt).getTime() > Date.now()
+        ? new Date().toISOString()
+        : rawMeasuredAt;
       if (totalMinutes > 0) {
         samples.push({ metric: 'zone2_minutes', value: totalMinutes, unit: 'min', measuredAt, sourceKind: 'google_fit' });
       }
@@ -324,8 +338,15 @@ export async function fetchGoogleFitSamples(accessToken: string): Promise<Sample
   }
 
   // Fall back to Google Fit REST aggregate API
-  const now = Date.now();
-  const ninetyDaysAgo = now - 90 * 24 * 60 * 60 * 1000;
+  const nowDate = new Date();
+  const startDate = new Date(Date.UTC(
+    nowDate.getUTCFullYear(),
+    nowDate.getUTCMonth(),
+    nowDate.getUTCDate() - 90,
+    0, 0, 0, 0,
+  ));
+  const startTimeMillis = startDate.getTime();
+  const endTimeMillis = nowDate.getTime();
 
   const res = await fetch('https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate', {
     method: 'POST',
@@ -338,8 +359,8 @@ export async function fetchGoogleFitSamples(accessToken: string): Promise<Sample
         { dataTypeName: DATA_TYPE_ACTIVE_MINUTES },
       ],
       bucketByTime: { durationMillis: 24 * 60 * 60 * 1000 },
-      startTimeMillis: ninetyDaysAgo,
-      endTimeMillis: now,
+      startTimeMillis,
+      endTimeMillis,
     }),
   });
 
