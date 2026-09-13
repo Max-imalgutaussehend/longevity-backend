@@ -1,4 +1,4 @@
-import type { Sample, Metric, SourceKind } from '../score/types.js';
+import type { Metric, SourceKind } from '../score/types.js';
 
 // Mulberry32 deterministic PRNG
 function mulberry32(seed: number) {
