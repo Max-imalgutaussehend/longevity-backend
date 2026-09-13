@@ -37,7 +37,6 @@
       },
       "MetricResult": {
         "type": "object",
-        "required": ["metric", "domain", "value", "unit", "percentile", "ageDays", "freshness", "effectiveWeight", "contribution", "available"],
         "properties": {
           "metric": {
             "type": "string"
@@ -82,7 +81,6 @@
       },
       "DomainResult": {
         "type": "object",
-        "required": ["domain", "weight", "score", "metrics"],
         "properties": {
           "domain": {
             "type": "string"
@@ -103,7 +101,6 @@
       },
       "ScoreResult": {
         "type": "object",
-        "required": ["score", "coverage", "bioAge", "chronoAge", "band", "domains", "engineVersion", "computedAt"],
         "properties": {
           "score": {
             "type": "number"
@@ -119,7 +116,6 @@
           },
           "band": {
             "type": "object",
-            "required": ["low", "high"],
             "properties": {
               "low": {
                 "type": "integer"
@@ -146,7 +142,6 @@
       },
       "HistoryPoint": {
         "type": "object",
-        "required": ["date", "score", "coverage"],
         "properties": {
           "date": {
             "type": "string",
@@ -162,7 +157,6 @@
       },
       "Source": {
         "type": "object",
-        "required": ["id", "kind", "adapter", "enabled", "lastSyncAt", "sampleCount"],
         "properties": {
           "id": {
             "type": "string",
@@ -191,7 +185,6 @@
       },
       "ShareToken": {
         "type": "object",
-        "required": ["id", "bandLow", "bandHigh", "issuedAt", "expiresAt", "revokedAt", "partnerRef"],
         "properties": {
           "id": {
             "type": "string"
@@ -227,7 +220,6 @@
       },
       "PartnerOffer": {
         "type": "object",
-        "required": ["id", "partnerName", "title", "description", "minBand", "valueLabel", "isDemo", "qualified"],
         "properties": {
           "id": {
             "type": "string",
@@ -253,34 +245,6 @@
           },
           "qualified": {
             "type": "boolean"
-          }
-        }
-      },
-      "User": {
-        "type": "object",
-        "required": ["id", "email", "displayName", "birthDate", "sex", "chronoAge"],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "email": {
-            "type": "string",
-            "format": "email"
-          },
-          "displayName": {
-            "type": ["string", "null"]
-          },
-          "birthDate": {
-            "type": "string",
-            "format": "date"
-          },
-          "sex": {
-            "type": "string",
-            "enum": ["m", "f"]
-          },
-          "chronoAge": {
-            "type": "number"
           }
         }
       },
@@ -456,14 +420,7 @@
         "summary": "Get current user",
         "responses": {
           "200": {
-            "description": "User object",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              }
-            }
+            "description": "User object"
           },
           "401": {
             "description": "Unauthenticated"
@@ -788,6 +745,204 @@
         }
       }
     },
+    "/sources/{provider}/connect": {
+      "post": {
+        "operationId": "connectSourceProvider",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Start OAuth flow for a provider (withings, google-fit, oura, strava)",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "withings",
+                "google-fit",
+                "oura",
+                "strava"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorize URL"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Unknown provider"
+          }
+        }
+      }
+    },
+    "/oauth/callback/{provider}": {
+      "get": {
+        "operationId": "oauthCallback",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "OAuth redirect target — exchanges code for tokens",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "withings",
+                "google-fit",
+                "oura",
+                "strava"
+              ]
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connected"
+          },
+          "400": {
+            "description": "Missing/invalid params"
+          },
+          "404": {
+            "description": "Unknown provider"
+          }
+        }
+      }
+    },
+    "/sources/{id}/disconnect": {
+      "delete": {
+        "operationId": "disconnectSource",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Remove OAuth credentials, keep samples",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Disconnected"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/sources/withings/sync": {
+      "post": {
+        "operationId": "syncWithings",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Pull latest measures/activity/sleep from Withings",
+        "responses": {
+          "200": {
+            "description": "Inserted count"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not connected"
+          }
+        }
+      }
+    },
+    "/sources/google-fit/sync": {
+      "post": {
+        "operationId": "syncGoogleFit",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Pull latest steps/HR/sleep/active-minutes from Google Fit",
+        "responses": {
+          "200": {
+            "description": "Inserted count"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not connected"
+          }
+        }
+      }
+    },
+    "/sources/oura/sync": {
+      "post": {
+        "operationId": "syncOura",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Pull latest sleep/readiness/activity from Oura",
+        "responses": {
+          "200": {
+            "description": "Inserted count"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not connected"
+          }
+        }
+      }
+    },
+    "/sources/strava/sync": {
+      "post": {
+        "operationId": "syncStrava",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Pull latest activities since last sync — strength_sessions + zone2_minutes",
+        "responses": {
+          "200": {
+            "description": "Inserted count"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not connected"
+          }
+        }
+      }
+    },
     "/labs": {
       "post": {
         "operationId": "postLabs",
@@ -839,6 +994,36 @@
         "responses": {
           "201": {
             "description": "Inserted metrics"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/sources/fhir/upload": {
+      "post": {
+        "operationId": "uploadFhir",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Import lab values from an HL7 FHIR R4 Bundle or Observation (LOINC-mapped, max 5MB)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Inserted count"
+          },
+          "400": {
+            "description": "Invalid FHIR resource"
           },
           "401": {
             "description": "Unauthenticated"
@@ -918,6 +1103,23 @@
           },
           "401": {
             "description": "Wrong password"
+          }
+        }
+      }
+    },
+    "/account/export": {
+      "get": {
+        "operationId": "exportAccount",
+        "tags": [
+          "Account"
+        ],
+        "summary": "DSGVO Art. 20 data export — user, sources, samples, scoreSnapshots, shareTokens as JSON",
+        "responses": {
+          "200": {
+            "description": "Full account data export (application/json, Content-Disposition: attachment)"
+          },
+          "401": {
+            "description": "Unauthenticated"
           }
         }
       }

@@ -96,12 +96,60 @@ paths['/sources/health-auto-export/webhook'] = {
     responses: { 200: { description: 'Inserted count' }, ...auth401 } },
 };
 
+paths['/sources/{provider}/connect'] = {
+  post: { operationId: 'connectSourceProvider', tags: ['Sources'], summary: 'Start OAuth flow for a provider (withings, google-fit, oura, strava)',
+    parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string', enum: ['withings', 'google-fit', 'oura', 'strava'] } }],
+    responses: { 200: { description: 'Authorize URL' }, 404: { description: 'Unknown provider' }, ...auth401 } },
+};
+
+paths['/oauth/callback/{provider}'] = {
+  get: { operationId: 'oauthCallback', tags: ['Sources'], summary: 'OAuth redirect target — exchanges code for tokens',
+    parameters: [
+      { name: 'provider', in: 'path', required: true, schema: { type: 'string', enum: ['withings', 'google-fit', 'oura', 'strava'] } },
+      { name: 'code', in: 'query', required: true, schema: { type: 'string' } },
+      { name: 'state', in: 'query', required: true, schema: { type: 'string' } },
+    ],
+    responses: { 200: { description: 'Connected' }, 400: { description: 'Missing/invalid params' }, 404: { description: 'Unknown provider' } } },
+};
+
+paths['/sources/{id}/disconnect'] = {
+  delete: { operationId: 'disconnectSource', tags: ['Sources'], summary: 'Remove OAuth credentials, keep samples',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: { 204: { description: 'Disconnected' }, 404: { description: 'Not found' }, ...auth401 } },
+};
+
+paths['/sources/withings/sync'] = {
+  post: { operationId: 'syncWithings', tags: ['Sources'], summary: 'Pull latest measures/activity/sleep from Withings',
+    responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
+};
+
+paths['/sources/google-fit/sync'] = {
+  post: { operationId: 'syncGoogleFit', tags: ['Sources'], summary: 'Pull latest steps/HR/sleep/active-minutes from Google Fit',
+    responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
+};
+
+paths['/sources/oura/sync'] = {
+  post: { operationId: 'syncOura', tags: ['Sources'], summary: 'Pull latest sleep/readiness/activity from Oura',
+    responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
+};
+
+paths['/sources/strava/sync'] = {
+  post: { operationId: 'syncStrava', tags: ['Sources'], summary: 'Pull latest activities since last sync — strength_sessions + zone2_minutes',
+    responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
+};
+
 paths['/labs'] = {
   post: { operationId: 'postLabs', tags: ['Sources'], summary: 'Manual lab values',
     requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['values'], properties: {
       values: { type: 'array', items: { type: 'object', required: ['metric', 'value', 'unit'], properties: { metric: { type: 'string' }, value: { type: 'number' }, unit: { type: 'string' }, measuredAt: { type: 'string', format: 'date-time' } } } },
     } } } } },
     responses: { 201: { description: 'Inserted metrics' }, ...auth401 } },
+};
+
+paths['/sources/fhir/upload'] = {
+  post: { operationId: 'uploadFhir', tags: ['Sources'], summary: 'Import lab values from an HL7 FHIR R4 Bundle or Observation (LOINC-mapped, max 5MB)',
+    requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+    responses: { 201: { description: 'Inserted count' }, 400: { description: 'Invalid FHIR resource' }, ...auth401 } },
 };
 
 paths['/report/weekly'] = {
@@ -117,6 +165,11 @@ paths['/account'] = {
   delete: { operationId: 'deleteAccount', tags: ['Account'], summary: 'Delete account',
     requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['password'], properties: { password: { type: 'string' } } } } } },
     responses: { 204: { description: 'Deleted' }, 401: { description: 'Wrong password' } } },
+};
+
+paths['/account/export'] = {
+  get: { operationId: 'exportAccount', tags: ['Account'], summary: 'DSGVO Art. 20 data export — user, sources, samples, scoreSnapshots, shareTokens as JSON',
+    responses: { 200: { description: 'Full account data export (application/json, Content-Disposition: attachment)' }, ...auth401 } },
 };
 
 paths['/share-tokens'] = {

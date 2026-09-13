@@ -16,6 +16,13 @@ import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib
 import { PgSessionStore } from './lib/pgSessionStore.js';
 import { parseAppleHealthXml } from './adapters/appleHealth.js';
 import { parseHealthAutoExport } from './adapters/healthAutoExport.js';
+import { parseFhirBundle } from './adapters/fhir.js';
+import { exchangeCodeForToken, getValidToken } from './lib/oauthTokens.js';
+import { oauthProviders, providerToSourceKind } from './lib/oauthProviders.js';
+import { fetchWithingsSamples } from './adapters/withings.js';
+import { fetchGoogleFitSamples } from './adapters/googleFit.js';
+import { fetchOuraSamples } from './adapters/oura.js';
+import { fetchStravaSamples } from './adapters/strava.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Sample } from './score/types.js';
@@ -393,6 +400,205 @@ const start = async () => {
     return { ok: true, sampleCount: newSamples.length };
   });
 
+  // ── Generic OAuth (Issue #30 — Fundament für Withings/Google Fit/Oura/Strava) ───
+
+  app.post('/api/sources/:provider/connect', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { provider } = req.params as { provider: string };
+    const oauthProvider = oauthProviders[provider];
+    if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const state = Buffer.from(JSON.stringify({ userId: user.id, provider })).toString('base64url');
+
+    const url = new URL(oauthProvider.authorizeUrl);
+    url.searchParams.set('client_id', oauthProvider.clientId ?? '');
+    url.searchParams.set('redirect_uri', oauthProvider.redirectUri(baseUrl));
+    url.searchParams.set('scope', oauthProvider.scope);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('state', state);
+
+    return { url: url.toString() };
+  });
+
+  app.get('/api/oauth/callback/:provider', async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    const { code, state } = req.query as { code?: string; state?: string };
+    const oauthProvider = oauthProviders[provider];
+    if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+    if (!code || !state) return reply.status(400).send({ title: 'code oder state fehlt.' });
+
+    const sourceKind = providerToSourceKind(provider);
+    if (!sourceKind) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+
+    let userId: string;
+    try {
+      ({ userId } = JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as { userId: string });
+    } catch {
+      return reply.status(400).send({ title: 'Ungültiger state-Parameter.' });
+    }
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const credentials = await exchangeCodeForToken(oauthProvider, code, baseUrl);
+
+    let [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, userId), eq(sources.kind, sourceKind)))
+      .limit(1);
+
+    if (!src) {
+      [src] = await db.insert(sources).values({
+        userId, kind: sourceKind, adapter: provider,
+        enabled: true, consentAt: new Date(), credentials,
+      }).returning();
+    } else {
+      await db.update(sources).set({ credentials, enabled: true, consentAt: new Date() }).where(eq(sources.id, src.id));
+    }
+
+    return reply.status(200).send({ ok: true, sourceId: src.id });
+  });
+
+  app.delete('/api/sources/:id/disconnect', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { id } = req.params as { id: string };
+    const [source] = await db.select().from(sources)
+      .where(and(eq(sources.id, id), eq(sources.userId, user.id)))
+      .limit(1);
+
+    if (!source) return reply.status(404).send({ title: 'Quelle nicht gefunden.' });
+
+    await db.update(sources).set({ credentials: null, enabled: false }).where(eq(sources.id, id));
+
+    return reply.status(204).send();
+  });
+
+  // ── Withings sync (Issue #36) ────────────────────────────────────────────────
+
+  app.post('/api/sources/withings/sync', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'withings')))
+      .limit(1);
+
+    if (!src) return reply.status(404).send({ title: 'Withings ist nicht verbunden.' });
+
+    const accessToken = await getValidToken(src.id, oauthProviders.withings);
+    const parsedSamples = await fetchWithingsSamples(accessToken);
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      await db.insert(samples).values({
+        userId: user.id, sourceId: src.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoNothing();
+      inserted++;
+    }
+
+    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+
+    return { inserted, sourceId: src.id };
+  });
+
+  // ── Google Fit sync (Issue #37) ──────────────────────────────────────────────
+
+  app.post('/api/sources/google-fit/sync', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'google_fit')))
+      .limit(1);
+
+    if (!src) return reply.status(404).send({ title: 'Google Fit ist nicht verbunden.' });
+
+    const accessToken = await getValidToken(src.id, oauthProviders['google-fit']);
+    const parsedSamples = await fetchGoogleFitSamples(accessToken);
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      await db.insert(samples).values({
+        userId: user.id, sourceId: src.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoNothing();
+      inserted++;
+    }
+
+    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+
+    return { inserted, sourceId: src.id };
+  });
+
+  // ── Oura sync (Issue #33) ────────────────────────────────────────────────────
+
+  app.post('/api/sources/oura/sync', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'oura')))
+      .limit(1);
+
+    if (!src) return reply.status(404).send({ title: 'Oura ist nicht verbunden.' });
+
+    const accessToken = await getValidToken(src.id, oauthProviders.oura);
+    const parsedSamples = await fetchOuraSamples(accessToken);
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      await db.insert(samples).values({
+        userId: user.id, sourceId: src.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoNothing();
+      inserted++;
+    }
+
+    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+
+    return { inserted, sourceId: src.id };
+  });
+
+  // ── Strava sync (Issue #34) ──────────────────────────────────────────────────
+
+  app.post('/api/sources/strava/sync', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'strava')))
+      .limit(1);
+
+    if (!src) return reply.status(404).send({ title: 'Strava ist nicht verbunden.' });
+
+    const since = src.lastSyncAt ? Math.floor(src.lastSyncAt.getTime() / 1000) : Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60;
+    const accessToken = await getValidToken(src.id, oauthProviders.strava);
+    const parsedSamples = await fetchStravaSamples(accessToken, since);
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      await db.insert(samples).values({
+        userId: user.id, sourceId: src.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoUpdate({
+        target: [samples.userId, samples.metric, samples.measuredAt],
+        set: { value: s.value },
+      });
+      inserted++;
+    }
+
+    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+
+    return { inserted, sourceId: src.id };
+  });
+
   // ── Report ────────────────────────────────────────────────────────────────────
 
   app.get('/api/report/weekly', async (req, reply) => {
@@ -464,6 +670,51 @@ const start = async () => {
 
   // ── Account ───────────────────────────────────────────────────────────────────
 
+  app.get('/api/account/export', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const [userSources, userSamples, userSnapshots, userShareTokens] = await Promise.all([
+      db.select().from(sources).where(eq(sources.userId, user.id)),
+      db.select().from(samples).where(eq(samples.userId, user.id)),
+      db.select().from(scoreSnapshots).where(eq(scoreSnapshots.userId, user.id)),
+      db.select().from(shareTokens).where(eq(shareTokens.userId, user.id)),
+    ]);
+
+    const exportData = {
+      user: {
+        email: user.email,
+        displayName: user.displayName,
+        birthDate: user.birthDate,
+        sex: user.sex,
+        createdAt: user.createdAt.toISOString(),
+      },
+      sources: userSources.map((s) => ({
+        id: s.id, kind: s.kind, adapter: s.adapter, enabled: s.enabled,
+        consentAt: s.consentAt?.toISOString() ?? null,
+        lastSyncAt: s.lastSyncAt?.toISOString() ?? null,
+        createdAt: s.createdAt.toISOString(),
+      })),
+      samples: userSamples.map((s) => ({
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: s.measuredAt.toISOString(),
+      })),
+      scoreSnapshots: userSnapshots.map((s) => ({
+        computedFor: s.computedFor, score: s.score, coverage: s.coverage,
+        bioAge: s.bioAge, breakdown: s.breakdown, engineVersion: s.engineVersion,
+      })),
+      shareTokens: userShareTokens.map((t) => ({
+        bandLow: t.bandLow, bandHigh: t.bandHigh,
+        issuedAt: t.issuedAt.toISOString(), expiresAt: t.expiresAt.toISOString(),
+        revokedAt: t.revokedAt?.toISOString() ?? null, partnerRef: t.partnerRef,
+      })),
+    };
+
+    const date = new Date().toISOString().slice(0, 10);
+    reply.header('Content-Disposition', `attachment; filename="longevity-export-${date}.json"`);
+    return reply.type('application/json').send(exportData);
+  });
+
   app.delete('/api/account', async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
@@ -519,6 +770,46 @@ const start = async () => {
         set: { value: entry.value, unit: entry.unit },
       });
       inserted.push(entry.metric);
+    }
+
+    return reply.status(201).send({ inserted, sourceId: labSource.id });
+  });
+
+  // ── FHIR lab import (Issue #39) ──────────────────────────────────────────────
+
+  app.post('/api/sources/fhir/upload', { bodyLimit: 5 * 1024 * 1024 }, async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const parsedSamples = parseFhirBundle(req.body);
+    if (parsedSamples.length === 0) {
+      return reply.status(400).send({ title: 'Keine bekannten LOINC-Metriken im FHIR-Bundle gefunden.' });
+    }
+
+    let [labSource] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'lab')))
+      .limit(1);
+
+    if (!labSource) {
+      [labSource] = await db.insert(sources).values({
+        userId: user.id, kind: 'lab', adapter: 'fhir', enabled: true,
+        consentAt: new Date(), lastSyncAt: new Date(),
+      }).returning();
+    } else {
+      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, labSource.id));
+    }
+
+    let inserted = 0;
+    for (const s of parsedSamples) {
+      const rows = await db.insert(samples).values({
+        userId: user.id, sourceId: labSource.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      }).onConflictDoUpdate({
+        target: [samples.userId, samples.metric, samples.measuredAt],
+        set: { value: s.value, unit: s.unit },
+      }).returning({ id: samples.id });
+      if (rows.length > 0) inserted++;
     }
 
     return reply.status(201).send({ inserted, sourceId: labSource.id });
@@ -620,7 +911,7 @@ const start = async () => {
     const data = await req.file();
     if (!data) return reply.status(400).send({ title: 'Keine Datei hochgeladen.' });
 
-    const parsedSamples = await parseAppleHealthXml(data.file);
+    const parsedSamples = await parseAppleHealthXml(data.file, { birthDate: user.birthDate });
 
     let [src] = await db.select().from(sources)
       .where(and(eq(sources.userId, user.id), eq(sources.kind, 'apple_health')))
@@ -656,10 +947,10 @@ const start = async () => {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const payload = req.body as any;
-    const parsedSamples = parseHealthAutoExport(payload);
+    const parsedSamples = parseHealthAutoExport(payload, { birthDate: user.birthDate });
 
     let [src] = await db.select().from(sources)
-      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'apple_health'), eq(sources.adapter, 'health_auto_export')))
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'apple_health')))
       .limit(1);
 
     if (!src) {
@@ -668,17 +959,17 @@ const start = async () => {
         enabled: true, consentAt: new Date(), lastSyncAt: new Date(),
       }).returning();
     } else {
-      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({ adapter: 'health_auto_export', lastSyncAt: new Date() }).where(eq(sources.id, src.id));
     }
 
     let inserted = 0;
     for (const s of parsedSamples) {
-      await db.insert(samples).values({
+      const rows = await db.insert(samples).values({
         userId: user.id, sourceId: src.id,
         metric: s.metric, value: s.value, unit: s.unit,
         measuredAt: new Date(s.measuredAt),
-      }).onConflictDoNothing();
-      inserted++;
+      }).onConflictDoNothing().returning({ id: samples.id });
+      if (rows.length > 0) inserted++;
     }
 
     return reply.status(200).send({ inserted, sourceId: src.id });

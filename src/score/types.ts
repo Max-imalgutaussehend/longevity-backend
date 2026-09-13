@@ -5,7 +5,7 @@ export type Metric =
   | 'smoking' | 'alcohol_units' | 'hscrp';
 
 export type Domain = 'cardiometabolic' | 'recovery' | 'activity' | 'risk';
-export type SourceKind = 'apple_health' | 'oura' | 'lab' | 'questionnaire';
+export type SourceKind = 'apple_health' | 'oura' | 'lab' | 'questionnaire' | 'withings' | 'google_fit' | 'strava' | 'health_auto_export';
 
 export interface Sample {
   metric: Metric;

@@ -9,6 +9,14 @@ const schema = z.object({
   SMTP_URL: z.string().optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   COMMIT_SHA: z.string().default('dev'),
+  WITHINGS_CLIENT_ID: z.string().optional(),
+  WITHINGS_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_FIT_CLIENT_ID: z.string().optional(),
+  GOOGLE_FIT_CLIENT_SECRET: z.string().optional(),
+  OURA_CLIENT_ID: z.string().optional(),
+  OURA_CLIENT_SECRET: z.string().optional(),
+  STRAVA_CLIENT_ID: z.string().optional(),
+  STRAVA_CLIENT_SECRET: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
