@@ -7,12 +7,39 @@ import { z } from 'zod';
 import { env } from './env.js';
 import { db } from './db/client.js';
 import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots } from './db/schema.js';
-import { eq, desc, and, gte, asc } from 'drizzle-orm';
+import { eq, desc, and, gte, asc, sql } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
 import { computeScore, simulate, suggestLevers } from './score/index.js';
+import { METRICS } from './score/metrics.js';
 import { generate } from './mock/generate.js';
 import { isWeakPassword } from './lib/weakPasswords.js';
 import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
+
+const METRIC_LABELS: Record<string, string> = {
+  vo2max: 'VO₂max',
+  resting_hr: 'Ruhepuls',
+  systolic_bp: 'Systol. Blutdruck',
+  ldl: 'LDL-Cholesterin',
+  hdl: 'HDL-Cholesterin',
+  hba1c: 'HbA1c',
+  waist: 'Taillenumfang',
+  sleep_duration: 'Schlafdauer',
+  sleep_consistency: 'Schlafkonsistenz',
+  hrv_rmssd: 'HRV (RMSSD)',
+  zone2_minutes: 'Zone-2-Minuten',
+  steps: 'Schritte',
+  strength_sessions: 'Krafteinheiten',
+  smoking: 'Rauchen',
+  alcohol_units: 'Alkohol',
+  hscrp: 'hsCRP',
+};
+
+const DOMAIN_LABELS: Record<string, string> = {
+  cardiometabolic: 'Kardiometabolik',
+  recovery: 'Regeneration',
+  activity: 'Aktivität',
+  risk: 'Risiko',
+};
 import { PgSessionStore } from './lib/pgSessionStore.js';
 import { parseAppleHealthXml } from './adapters/appleHealth.js';
 import { parseHealthAutoExport } from './adapters/healthAutoExport.js';
@@ -25,7 +52,7 @@ import { fetchOuraSamples } from './adapters/oura.js';
 import { fetchStravaSamples } from './adapters/strava.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { Sample } from './score/types.js';
+import type { Sample, Metric } from './score/types.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
 declare module 'fastify' {
@@ -59,6 +86,32 @@ async function getUserSamples(userId: string): Promise<Sample[]> {
   }));
 }
 
+async function upsertGoogleFitSamples(userId: string, sourceId: string, parsedSamples: Sample[]): Promise<number> {
+  if (parsedSamples.length === 0) return 0;
+  // Clean up previous raw/fragmented samples for this source to ensure pristine daily history
+  await db.delete(samples).where(eq(samples.sourceId, sourceId));
+
+  const chunkSize = 200;
+  for (let i = 0; i < parsedSamples.length; i += chunkSize) {
+    const chunk = parsedSamples.slice(i, i + chunkSize);
+    await db.insert(samples).values(chunk.map(s => ({
+      userId,
+      sourceId,
+      metric: s.metric,
+      value: s.value,
+      unit: s.unit,
+      measuredAt: new Date(s.measuredAt),
+    }))).onConflictDoUpdate({
+      target: [samples.userId, samples.metric, samples.measuredAt],
+      set: {
+        value: sql`EXCLUDED.value`,
+        unit: sql`EXCLUDED.unit`,
+      },
+    });
+  }
+  return parsedSamples.length;
+}
+
 const start = async () => {
   const app = Fastify({
     logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
@@ -82,6 +135,18 @@ const start = async () => {
       maxAge: 30 * 24 * 60 * 60 * 1000,
     },
     saveUninitialized: false,
+  });
+
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    if (typeof body !== 'string' || body.trim() === '') {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(body));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
   });
 
   // ── OpenAPI spec ──────────────────────────────────────────────────────────────
@@ -176,6 +241,72 @@ const start = async () => {
     await req.session.destroy();
     return reply.status(204).send();
   });
+
+  // ── Google Sign-In ────────────────────────────────────────────────────────────
+
+  app.post('/api/auth/google/url', async (req) => {
+    const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
+    if (!googleClientId) return { url: null };
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const redirectUri = env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/auth/google/callback`;
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id', googleClientId);
+    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', 'openid email profile');
+    url.searchParams.set('prompt', 'select_account');
+    return { url: url.toString() };
+  });
+
+  app.get('/api/auth/google/callback', async (req, reply) => {
+    const { code } = req.query as { code?: string };
+    const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
+    const googleClientSecret = env.GOOGLE_FIT_CLIENT_SECRET ?? env.GOOGLE_HEALTH_CLIENT_SECRET;
+    if (!googleClientId || !googleClientSecret || !code) {
+      return reply.redirect('/login?error=google_auth_failed');
+    }
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const redirectUri = env.GOOGLE_REDIRECT_URI ?? `${baseUrl}/api/auth/google/callback`;
+
+    try {
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          client_id: googleClientId,
+          client_secret: googleClientSecret,
+          redirect_uri: redirectUri,
+        }),
+      });
+      if (!tokenRes.ok) throw new Error('Token exchange failed');
+      const tokenData = await tokenRes.json() as { access_token: string };
+
+      const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      if (!userRes.ok) throw new Error('UserInfo request failed');
+      const userInfo = await userRes.json() as { email?: string; name?: string };
+
+      if (!userInfo.email) {
+        return reply.redirect('/login?error=no_email');
+      }
+
+      const [existingUser] = await db.select().from(users).where(eq(users.email, userInfo.email)).limit(1);
+      if (existingUser) {
+        req.session.userId = existingUser.id;
+        return reply.redirect('/dashboard');
+      }
+
+      return reply.redirect(`/register?googleEmail=${encodeURIComponent(userInfo.email)}&name=${encodeURIComponent(userInfo.name ?? '')}`);
+    } catch (err) {
+      req.log.error(err, 'Google Sign-In failed');
+      return reply.redirect('/login?error=google_auth_failed');
+    }
+  });
+
 
   // ── Me ────────────────────────────────────────────────────────────────────────
 
@@ -347,6 +478,90 @@ const start = async () => {
     }));
   });
 
+  app.get('/api/samples/summary', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const rawSamples = await db
+      .select({
+        id: samples.id,
+        metric: samples.metric,
+        value: samples.value,
+        unit: samples.unit,
+        measuredAt: samples.measuredAt,
+        createdAt: samples.createdAt,
+        sourceKind: sources.kind,
+        sourceAdapter: sources.adapter,
+      })
+      .from(samples)
+      .leftJoin(sources, eq(samples.sourceId, sources.id))
+      .where(eq(samples.userId, user.id))
+      .orderBy(desc(samples.measuredAt))
+      .limit(5000);
+
+    const metricDefs = new Map(METRICS.map(m => [m.metric, m]));
+    const byMetric = new Map<string, typeof rawSamples>();
+    for (const s of rawSamples) {
+      const list = byMetric.get(s.metric) ?? [];
+      list.push(s);
+      byMetric.set(s.metric, list);
+    }
+
+    const metricsSummary = Array.from(byMetric.entries()).map(([metric, list]) => {
+      const latest = list[0];
+      const def = metricDefs.get(metric as Metric);
+      const label = METRIC_LABELS[metric] ?? metric;
+      const domain = def?.domain ?? 'activity';
+      const domainLabel = DOMAIN_LABELS[domain] ?? domain;
+
+      return {
+        metric,
+        label,
+        domain,
+        domainLabel,
+        latestValue: latest.value,
+        unit: latest.unit,
+        latestMeasuredAt: latest.measuredAt.toISOString(),
+        sourceKind: latest.sourceKind ?? 'manual',
+        sourceAdapter: latest.sourceAdapter ?? null,
+        count: list.length,
+        history: list.slice(0, 90).map(item => ({
+          id: Number(item.id),
+          value: item.value,
+          measuredAt: item.measuredAt.toISOString(),
+          sourceKind: item.sourceKind ?? 'manual',
+        })),
+      };
+    });
+
+    metricsSummary.sort((a, b) => new Date(b.latestMeasuredAt).getTime() - new Date(a.latestMeasuredAt).getTime());
+
+    const recentSamples = rawSamples.slice(0, 100).map(s => ({
+      id: Number(s.id),
+      metric: s.metric,
+      label: METRIC_LABELS[s.metric] ?? s.metric,
+      value: s.value,
+      unit: s.unit,
+      measuredAt: s.measuredAt.toISOString(),
+      sourceKind: s.sourceKind ?? 'manual',
+      sourceAdapter: s.sourceAdapter ?? null,
+    }));
+
+    let minDate: string | null = null;
+    let maxDate: string | null = null;
+    if (rawSamples.length > 0) {
+      maxDate = rawSamples[0].measuredAt.toISOString();
+      minDate = rawSamples[rawSamples.length - 1].measuredAt.toISOString();
+    }
+
+    return {
+      metrics: metricsSummary,
+      recentSamples,
+      totalCount: rawSamples.length,
+      dateRange: minDate && maxDate ? { min: minDate, max: maxDate } : null,
+    };
+  });
+
   app.patch('/api/sources/:id', async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
@@ -395,9 +610,43 @@ const start = async () => {
       })));
     }
 
-    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, id));
+    await db.update(sources).set({ lastSyncAt: new Date(), enabled: true }).where(eq(sources.id, id));
 
     return { ok: true, sampleCount: newSamples.length };
+  });
+
+  app.post('/api/sources/mock/generate', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    let [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.adapter, 'mock')))
+      .limit(1);
+
+    if (!src) {
+      [src] = await db.insert(sources).values({
+        userId: user.id,
+        kind: 'apple_health',
+        adapter: 'mock',
+        enabled: true,
+      }).returning();
+    } else {
+      await db.update(sources).set({ enabled: true, lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+    }
+
+    await db.delete(samples).where(and(eq(samples.sourceId, src.id), eq(samples.userId, user.id)));
+
+    const seed = user.id.charCodeAt(0) * 31 + Date.now() % 1000;
+    const newSamples = generate(seed, 90);
+    if (newSamples.length > 0) {
+      await db.insert(samples).values(newSamples.map(s => ({
+        userId: user.id, sourceId: src.id,
+        metric: s.metric, value: s.value, unit: s.unit,
+        measuredAt: new Date(s.measuredAt),
+      })));
+    }
+
+    return { ok: true, sourceId: src.id, sampleCount: newSamples.length };
   });
 
   // ── Generic OAuth (Issue #30 — Fundament für Withings/Google Fit/Oura/Strava) ───
@@ -410,15 +659,23 @@ const start = async () => {
     const oauthProvider = oauthProviders[provider];
     if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
 
+    const body = (req.body as { redirectUri?: string } | undefined) ?? {};
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const state = Buffer.from(JSON.stringify({ userId: user.id, provider })).toString('base64url');
 
+    const redirectUri = body.redirectUri ?? oauthProvider.redirectUri(baseUrl);
+
     const url = new URL(oauthProvider.authorizeUrl);
     url.searchParams.set('client_id', oauthProvider.clientId ?? '');
-    url.searchParams.set('redirect_uri', oauthProvider.redirectUri(baseUrl));
+    url.searchParams.set('redirect_uri', redirectUri);
     url.searchParams.set('scope', oauthProvider.scope);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('state', state);
+
+    if (provider === 'google-fit' || provider === 'google-health') {
+      url.searchParams.set('access_type', 'offline');
+      url.searchParams.set('prompt', 'consent');
+    }
 
     return { url: url.toString() };
   });
@@ -456,7 +713,92 @@ const start = async () => {
       await db.update(sources).set({ credentials, enabled: true, consentAt: new Date() }).where(eq(sources.id, src.id));
     }
 
+    // Auto-sync initial samples for Google Fit / Google Health
+    if (sourceKind === 'google_fit') {
+      try {
+        const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
+        await upsertGoogleFitSamples(userId, src.id, parsedSamples);
+        await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      } catch (err) {
+        req.log.warn(err, 'Initial Google sync after OAuth callback failed');
+      }
+    }
+
+    const acceptsHtml = req.headers.accept?.includes('text/html');
+    if (acceptsHtml) {
+      return reply.redirect('/daten?connected=' + encodeURIComponent(provider));
+    }
+
     return reply.status(200).send({ ok: true, sourceId: src.id });
+  });
+
+  // Manual code exchange endpoint (for Codelab redirect_uri=https://www.google.com or manual code entry)
+  app.post('/api/sources/:provider/exchange', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { provider } = req.params as { provider: string };
+    const oauthProvider = oauthProviders[provider];
+    if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+
+    const body = req.body as { code?: string; redirectUri?: string } | undefined;
+    let code = body?.code?.trim();
+    if (!code) return reply.status(400).send({ title: 'Code erforderlich.' });
+
+    // Handle user pasting complete callback URL (e.g. https://www.google.com/?code=4/0A...)
+    if (code.includes('code=')) {
+      try {
+        const parsedUrl = new URL(code.startsWith('http') ? code : `https://${code}`);
+        const parsedCode = parsedUrl.searchParams.get('code');
+        if (parsedCode) code = parsedCode;
+      } catch {
+        // use raw code string
+      }
+    }
+
+    const sourceKind = providerToSourceKind(provider);
+    if (!sourceKind) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const redirectUri = body?.redirectUri ?? (provider === 'google-fit' || provider === 'google-health' ? 'https://www.google.com' : oauthProvider.redirectUri(baseUrl));
+
+    let credentials;
+    try {
+      credentials = await exchangeCodeForToken(oauthProvider, code, baseUrl, redirectUri);
+    } catch {
+      // If provided redirectUri failed, try with provider's configured redirectUri as fallback
+      try {
+        credentials = await exchangeCodeForToken(oauthProvider, code, baseUrl, oauthProvider.redirectUri(baseUrl));
+      } catch {
+        return reply.status(400).send({ title: 'Ungültiger Autorisierungscode oder abgelaufenes Token.' });
+      }
+    }
+
+    let [src] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, sourceKind)))
+      .limit(1);
+
+    if (!src) {
+      [src] = await db.insert(sources).values({
+        userId: user.id, kind: sourceKind, adapter: provider,
+        enabled: true, consentAt: new Date(), credentials,
+      }).returning();
+    } else {
+      await db.update(sources).set({ credentials, enabled: true, consentAt: new Date() }).where(eq(sources.id, src.id));
+    }
+
+    let inserted = 0;
+    if (sourceKind === 'google_fit') {
+      try {
+        const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
+        inserted = await upsertGoogleFitSamples(user.id, src.id, parsedSamples);
+        await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      } catch (err) {
+        req.log.warn(err, 'Initial Google sync after manual exchange failed');
+      }
+    }
+
+    return reply.status(200).send({ ok: true, sourceId: src.id, inserted });
   });
 
   app.delete('/api/sources/:id/disconnect', async (req, reply) => {
@@ -469,6 +811,10 @@ const start = async () => {
       .limit(1);
 
     if (!source) return reply.status(404).send({ title: 'Quelle nicht gefunden.' });
+
+    if (source.adapter === 'mock') {
+      await db.delete(samples).where(and(eq(samples.sourceId, id), eq(samples.userId, user.id)));
+    }
 
     await db.update(sources).set({ credentials: null, enabled: false }).where(eq(sources.id, id));
 
@@ -519,16 +865,7 @@ const start = async () => {
 
     const accessToken = await getValidToken(src.id, oauthProviders['google-fit']);
     const parsedSamples = await fetchGoogleFitSamples(accessToken);
-
-    let inserted = 0;
-    for (const s of parsedSamples) {
-      await db.insert(samples).values({
-        userId: user.id, sourceId: src.id,
-        metric: s.metric, value: s.value, unit: s.unit,
-        measuredAt: new Date(s.measuredAt),
-      }).onConflictDoNothing();
-      inserted++;
-    }
+    const inserted = await upsertGoogleFitSamples(user.id, src.id, parsedSamples);
 
     await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
 

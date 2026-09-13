@@ -1,0 +1,59 @@
+name: Backend CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ci:
+    name: Backend CI
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: longevity_test
+          POSTGRES_USER: longevity
+          POSTGRES_PASSWORD: longevity_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://longevity:longevity_test@localhost:5432/longevity_test
+      SESSION_SECRET: test-session-secret-32-bytes-long!
+      SIGNING_KEY_PRIVATE: ${{ secrets.SIGNING_KEY_PRIVATE || 'ci-test-placeholder-private' }}
+      SIGNING_KEY_PUBLIC: ${{ secrets.SIGNING_KEY_PUBLIC || 'ci-test-placeholder-public' }}
+      PUBLIC_BASE_URL: http://localhost
+      SMTP_URL: smtp://localhost:1025
+      NODE_ENV: test
+      COMMIT_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm db:migrate
+      - run: pnpm test
+
+      - name: Notify superprojekt
+        if: success() && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "GH_SUBMODULE_TOKEN not configured in repo secrets, skipping dispatch"; exit 0; fi
+          gh api repos/Max-imalgutaussehend/LONGEVITY/dispatches \
+            --field event_type=submodule-updated \
+            --field "client_payload[repo]=backend"
+        env:
+          GH_TOKEN: ${{ secrets.GH_SUBMODULE_TOKEN }}
