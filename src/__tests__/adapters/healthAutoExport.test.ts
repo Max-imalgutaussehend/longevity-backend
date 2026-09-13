@@ -93,4 +93,38 @@ describe('parseHealthAutoExport — strength_sessions from Workout entries', () 
     const values = strength.map((s) => s.value).sort((a, b) => a - b);
     expect(values).toEqual([1, 2]);
   });
+
+  it('calculates sleep consistency correctly across midnight', () => {
+    const samples = parseHealthAutoExport([
+      {
+        name: 'SleepAnalysis', units: 'h', data: [
+          { date: '2024-06-01T23:50:00Z', qty: 7.5 },
+          { date: '2024-06-02T00:10:00Z', qty: 7.0 },
+        ],
+      },
+    ]);
+
+    const consistency = samples.filter((s) => s.metric === 'sleep_consistency');
+    expect(consistency).toHaveLength(1);
+    // Difference is only 20 minutes across midnight, StdDev of [710, 730] is 10
+    expect(consistency[0].value).toBeCloseTo(10, 1);
+  });
+
+  it('uses custom userAge for Zone 2 HRmax calculation', () => {
+    // 60-year-old: HRmax = 160, 60-70% band = [96, 112]
+    const samples = parseHealthAutoExport(
+      {
+        metrics: [],
+        workouts: [
+          { name: 'Walking', start: '2024-06-01T07:00:00Z', duration: 1800, heartRateAvg: 105 },
+        ],
+      } as never,
+      { userAge: 60 },
+    );
+
+    const zone2 = samples.filter((s) => s.metric === 'zone2_minutes');
+    expect(zone2).toHaveLength(1);
+    expect(zone2[0].value).toBe(30);
+  });
 });
+

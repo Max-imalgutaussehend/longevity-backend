@@ -947,10 +947,10 @@ const start = async () => {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const payload = req.body as any;
-    const parsedSamples = parseHealthAutoExport(payload);
+    const parsedSamples = parseHealthAutoExport(payload, { birthDate: user.birthDate });
 
     let [src] = await db.select().from(sources)
-      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'apple_health'), eq(sources.adapter, 'health_auto_export')))
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'apple_health')))
       .limit(1);
 
     if (!src) {
@@ -959,7 +959,7 @@ const start = async () => {
         enabled: true, consentAt: new Date(), lastSyncAt: new Date(),
       }).returning();
     } else {
-      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({ adapter: 'health_auto_export', lastSyncAt: new Date() }).where(eq(sources.id, src.id));
     }
 
     let inserted = 0;
