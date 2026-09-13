@@ -906,6 +906,44 @@
         }
       }
     },
+    "/sources/google/callback": {
+      "get": {
+        "operationId": "googleSourcesCallback",
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Alias for Google OAuth redirect callback",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connected"
+          },
+          "400": {
+            "description": "Missing/invalid params"
+          },
+          "404": {
+            "description": "Unknown provider"
+          }
+        }
+      }
+    },
     "/sources/{provider}/exchange": {
       "post": {
         "operationId": "exchangeSourceCode",
