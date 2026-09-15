@@ -467,6 +467,87 @@
         }
       }
     },
+    "/auth/request-password-reset": {
+      "post": {
+        "operationId": "requestPasswordReset",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "summary": "Request a password reset link — always returns 200 to avoid leaking whether an email is registered",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Missing email"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/auth/reset-password": {
+      "post": {
+        "operationId": "resetPassword",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "summary": "Set a new password using a reset token",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token",
+                  "password"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Invalid, expired or used token, or weak password"
+          }
+        }
+      }
+    },
     "/auth/accept-invite": {
       "post": {
         "operationId": "acceptInsurerInvite",
