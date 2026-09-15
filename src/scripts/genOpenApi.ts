@@ -71,6 +71,24 @@ paths['/me'] = {
   get: { operationId: 'getMe', tags: ['User'], summary: 'Get current user', responses: { 200: { description: 'User object' }, ...auth401 } },
 };
 
+paths['/organizations/join'] = {
+  post: { operationId: 'joinOrganization', tags: ['Insurer'], summary: 'Link the current b2c user to an organization via join code',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['joinCode'], properties: { joinCode: { type: 'string' } },
+    } } } },
+    responses: { 200: { description: 'OK' }, 404: { description: 'Invalid join code' }, 403: { description: 'Not a b2c user' }, ...auth401 } },
+};
+
+paths['/organizations/leave'] = {
+  post: { operationId: 'leaveOrganization', tags: ['Insurer'], summary: 'Unlink the current b2c user from their organization',
+    responses: { 204: { description: 'OK' }, 403: { description: 'Not a b2c user' }, ...auth401 } },
+};
+
+paths['/insurer/overview'] = {
+  get: { operationId: 'getInsurerOverview', tags: ['Insurer'], summary: 'Aggregate member metrics for the insurer dashboard — never individual health data',
+    responses: { 200: { description: 'Aggregate overview' }, 403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401 } },
+};
+
 paths['/score/current'] = {
   get: { operationId: 'getScoreCurrent', tags: ['Score'], summary: 'Current score + lazy snapshot',
     responses: { 200: { description: 'ScoreResult', content: { 'application/json': { schema: ref('ScoreResult') } } }, ...auth401 } },

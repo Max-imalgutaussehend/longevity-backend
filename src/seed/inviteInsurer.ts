@@ -19,6 +19,7 @@ async function main() {
       name: orgName,
       contactEmail,
       status: 'pending',
+      joinCode: randomBytes(6).toString('hex'),
     }).returning();
 
     const unusablePasswordHash = await hash(randomBytes(32).toString('base64url'));

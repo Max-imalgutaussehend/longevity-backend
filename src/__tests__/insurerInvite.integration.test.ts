@@ -28,6 +28,7 @@ describe.skipIf(!HAS_DB)('Insurer invite acceptance — integration', () => {
       name: 'Einladungs-Testkasse',
       contactEmail: `invite-${Date.now()}@test.local`,
       status: 'pending',
+      joinCode: `invite-test-${Date.now()}`,
     }).returning();
     orgId = org.id;
 

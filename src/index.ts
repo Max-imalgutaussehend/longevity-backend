@@ -7,7 +7,8 @@ import { z } from 'zod';
 import { env } from './env.js';
 import { db } from './db/client.js';
 import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots, organizations } from './db/schema.js';
-import { eq, desc, and, gte, asc, sql } from 'drizzle-orm';
+import type { Role } from './db/schema.js';
+import { eq, desc, and, gte, asc, sql, inArray } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
 import { computeScore, simulate, suggestLevers } from './score/index.js';
 import { METRICS } from './score/metrics.js';
@@ -74,6 +75,16 @@ async function requireUser(req: FastifyRequest, reply: FastifyReply) {
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!user) {
     reply.status(401).send({ title: 'Benutzer nicht gefunden.' });
+    return null;
+  }
+  return user;
+}
+
+async function requireRole(req: FastifyRequest, reply: FastifyReply, roles: readonly Role[]) {
+  const user = await requireUser(req, reply);
+  if (!user) return null;
+  if (!roles.includes(user.role as Role)) {
+    reply.status(403).send({ title: 'Keine Berechtigung für diese Aktion.' });
     return null;
   }
   return user;
@@ -415,6 +426,78 @@ const start = async () => {
       chronoAge: Math.round(chronoAge * 10) / 10,
       role: user.role, organizationId: user.organizationId,
       emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
+    };
+  });
+
+  app.post('/api/organizations/join', async (req, reply) => {
+    const user = await requireRole(req, reply, ['b2c']);
+    if (!user) return;
+
+    const { joinCode } = req.body as { joinCode?: string };
+    if (!joinCode) return reply.status(400).send({ title: 'Beitrittscode erforderlich.' });
+
+    const [org] = await db.select().from(organizations).where(eq(organizations.joinCode, joinCode)).limit(1);
+    if (!org || org.status !== 'active') {
+      return reply.status(404).send({ title: 'Ungültiger Beitrittscode.' });
+    }
+
+    await db.update(users).set({ organizationId: org.id }).where(eq(users.id, user.id));
+    return reply.status(200).send({ ok: true, organizationName: org.name });
+  });
+
+  app.post('/api/organizations/leave', async (req, reply) => {
+    const user = await requireRole(req, reply, ['b2c']);
+    if (!user) return;
+    await db.update(users).set({ organizationId: null }).where(eq(users.id, user.id));
+    return reply.status(204).send();
+  });
+
+  app.get('/api/insurer/overview', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const members = await db.select({ id: users.id, birthDate: users.birthDate, sex: users.sex })
+      .from(users)
+      .where(and(eq(users.organizationId, user.organizationId), eq(users.role, 'b2c')));
+
+    const memberIds = members.map((m) => m.id);
+    const activeMemberCount = memberIds.length;
+
+    let averageScore: number | null = null;
+    let averageCoverage: number | null = null;
+    let membersWithScoreCount = 0;
+
+    if (memberIds.length > 0) {
+      const latestPerMember = await db
+        .select({ userId: scoreSnapshots.userId, score: scoreSnapshots.score, coverage: scoreSnapshots.coverage, computedFor: scoreSnapshots.computedFor })
+        .from(scoreSnapshots)
+        .where(inArray(scoreSnapshots.userId, memberIds))
+        .orderBy(desc(scoreSnapshots.computedFor));
+
+      const latestByUser = new Map<string, { score: number; coverage: number }>();
+      for (const row of latestPerMember) {
+        if (!latestByUser.has(row.userId)) {
+          latestByUser.set(row.userId, { score: row.score, coverage: row.coverage });
+        }
+      }
+
+      const scores = [...latestByUser.values()];
+      membersWithScoreCount = scores.length;
+      if (scores.length > 0) {
+        averageScore = Math.round((scores.reduce((sum, s) => sum + s.score, 0) / scores.length) * 10) / 10;
+        averageCoverage = Math.round((scores.reduce((sum, s) => sum + s.coverage, 0) / scores.length) * 100) / 100;
+      }
+    }
+
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, user.organizationId)).limit(1);
+
+    return {
+      organizationName: org?.name ?? null,
+      activeMemberCount,
+      averageScore,
+      averageCoverage,
+      membersWithScoreCount,
     };
   });
 
