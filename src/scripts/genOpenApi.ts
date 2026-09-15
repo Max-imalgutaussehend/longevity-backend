@@ -34,6 +34,19 @@ paths['/auth/logout'] = {
   post: { operationId: 'logout', tags: ['Auth'], summary: 'Logout', responses: { 204: { description: 'OK' } } },
 };
 
+paths['/auth/verify-email'] = {
+  post: { operationId: 'verifyEmail', tags: ['Auth'], security: publicSecurity, summary: 'Confirm email verification token',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['token'], properties: { token: { type: 'string' } },
+    } } } },
+    responses: { 200: { description: 'OK' }, 400: { description: 'Invalid, expired or used token' } } },
+};
+
+paths['/auth/resend-verification'] = {
+  post: { operationId: 'resendVerification', tags: ['Auth'], summary: 'Resend the email verification link',
+    responses: { 200: { description: 'OK' }, 400: { description: 'Already verified' }, ...auth401 } },
+};
+
 paths['/auth/google/url'] = {
   post: { operationId: 'getGoogleAuthUrl', tags: ['Auth'], security: publicSecurity, summary: 'Get Google OAuth login URL',
     responses: { 200: { description: 'Google Auth URL', content: { 'application/json': { schema: { type: 'object', properties: { url: { type: 'string', nullable: true } } } } } } } },
