@@ -6,7 +6,7 @@ import multipart from '@fastify/multipart';
 import { z } from 'zod';
 import { env } from './env.js';
 import { db } from './db/client.js';
-import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots } from './db/schema.js';
+import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots, organizations } from './db/schema.js';
 import { eq, desc, and, gte, asc, sql } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
 import { computeScore, simulate, suggestLevers } from './score/index.js';
@@ -273,6 +273,36 @@ const start = async () => {
       subject: 'Bitte bestätige deine E-Mail-Adresse',
       html: `<p>Bitte bestätige deine E-Mail-Adresse:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>Der Link ist eine Stunde gültig.</p>`,
     });
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/api/auth/accept-invite', async (req, reply) => {
+    const { token, password } = req.body as { token?: string; password?: string };
+    if (!token || !password) return reply.status(400).send({ title: 'Token und Passwort erforderlich.' });
+    if (password.length < 10) return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
+    if (isWeakPassword(password)) return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
+
+    const result = await consumeEmailToken(token, 'insurer_invite');
+    if (!result.ok) {
+      const reasonTitle = result.reason === 'expired'
+        ? 'Die Einladung ist abgelaufen.'
+        : result.reason === 'used'
+        ? 'Diese Einladung wurde bereits verwendet.'
+        : 'Ungültiger Einladungslink.';
+      return reply.status(400).send({ title: reasonTitle });
+    }
+
+    const passwordHash = await hash(password);
+    const [user] = await db.update(users)
+      .set({ passwordHash, emailVerifiedAt: new Date() })
+      .where(eq(users.id, result.userId))
+      .returning();
+
+    if (user.organizationId) {
+      await db.update(organizations).set({ status: 'active' }).where(eq(organizations.id, user.organizationId));
+    }
+
+    req.session.userId = user.id;
     return reply.status(200).send({ ok: true });
   });
 

@@ -47,6 +47,14 @@ paths['/auth/resend-verification'] = {
     responses: { 200: { description: 'OK' }, 400: { description: 'Already verified' }, ...auth401 } },
 };
 
+paths['/auth/accept-invite'] = {
+  post: { operationId: 'acceptInsurerInvite', tags: ['Auth'], security: publicSecurity, summary: 'Accept an insurer admin invitation and set a password',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['token', 'password'], properties: { token: { type: 'string' }, password: { type: 'string', minLength: 10 } },
+    } } } },
+    responses: { 200: { description: 'OK' }, 400: { description: 'Invalid, expired or used token, or weak password' } } },
+};
+
 paths['/auth/google/url'] = {
   post: { operationId: 'getGoogleAuthUrl', tags: ['Auth'], security: publicSecurity, summary: 'Get Google OAuth login URL',
     responses: { 200: { description: 'Google Auth URL', content: { 'application/json': { schema: { type: 'object', properties: { url: { type: 'string', nullable: true } } } } } } } },

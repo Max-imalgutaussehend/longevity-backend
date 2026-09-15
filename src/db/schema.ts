@@ -33,7 +33,7 @@ export const emailTokens = pgTable('email_tokens', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ userIdx: index().on(t.userId) }));
 
-export type EmailTokenPurpose = 'verify_email' | 'reset_password';
+export type EmailTokenPurpose = 'verify_email' | 'reset_password' | 'insurer_invite';
 
 export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),
