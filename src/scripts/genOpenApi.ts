@@ -63,6 +63,14 @@ paths['/auth/reset-password'] = {
     responses: { 200: { description: 'OK' }, 400: { description: 'Invalid, expired or used token, or weak password' } } },
 };
 
+paths['/auth/accept-invite'] = {
+  post: { operationId: 'acceptInsurerInvite', tags: ['Auth'], security: publicSecurity, summary: 'Accept an insurer admin invitation and set a password',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['token', 'password'], properties: { token: { type: 'string' }, password: { type: 'string', minLength: 10 } },
+    } } } },
+    responses: { 200: { description: 'OK' }, 400: { description: 'Invalid, expired or used token, or weak password' } } },
+};
+
 paths['/auth/google/url'] = {
   post: { operationId: 'getGoogleAuthUrl', tags: ['Auth'], security: publicSecurity, summary: 'Get Google OAuth login URL',
     responses: { 200: { description: 'Google Auth URL', content: { 'application/json': { schema: { type: 'object', properties: { url: { type: 'string', nullable: true } } } } } } } },
@@ -77,6 +85,54 @@ paths['/auth/google/callback'] = {
 
 paths['/me'] = {
   get: { operationId: 'getMe', tags: ['User'], summary: 'Get current user', responses: { 200: { description: 'User object' }, ...auth401 } },
+};
+
+paths['/organizations/join'] = {
+  post: { operationId: 'joinOrganization', tags: ['Insurer'], summary: 'Link the current b2c user to an organization via join code',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['joinCode'], properties: { joinCode: { type: 'string' } },
+    } } } },
+    responses: { 200: { description: 'OK' }, 404: { description: 'Invalid join code' }, 403: { description: 'Not a b2c user' }, ...auth401 } },
+};
+
+paths['/organizations/leave'] = {
+  post: { operationId: 'leaveOrganization', tags: ['Insurer'], summary: 'Unlink the current b2c user from their organization',
+    responses: { 204: { description: 'OK' }, 403: { description: 'Not a b2c user' }, ...auth401 } },
+};
+
+paths['/insurer/overview'] = {
+  get: { operationId: 'getInsurerOverview', tags: ['Insurer'], summary: 'Aggregate member metrics for the insurer dashboard — never individual health data',
+    responses: { 200: { description: 'Aggregate overview' }, 403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401 } },
+};
+
+paths['/insurer/offers'] = {
+  get: { operationId: 'listInsurerOffers', tags: ['Insurer'], summary: 'List the organization\'s own partner offers',
+    responses: { 200: { description: 'PartnerOffer[]' }, 403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401 } },
+  post: { operationId: 'createInsurerOffer', tags: ['Insurer'], summary: 'Create a partner offer for the organization',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['title', 'description', 'minBand', 'valueLabel'],
+      properties: {
+        title: { type: 'string' }, description: { type: 'string' }, minBand: { type: 'integer', minimum: 0, maximum: 100 },
+        valueLabel: { type: 'string' }, validFrom: { type: 'string', format: 'date-time' }, validUntil: { type: 'string', format: 'date-time' },
+      },
+    } } } },
+    responses: { 201: { description: 'Created' }, 400: { description: 'Validation error' }, 403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401 } },
+};
+
+paths['/insurer/offers/{id}'] = {
+  patch: { operationId: 'updateInsurerOffer', tags: ['Insurer'], summary: 'Update one of the organization\'s own partner offers',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' }, description: { type: 'string' }, minBand: { type: 'integer', minimum: 0, maximum: 100 },
+        valueLabel: { type: 'string' }, validFrom: { type: 'string', format: 'date-time', nullable: true }, validUntil: { type: 'string', format: 'date-time', nullable: true },
+      },
+    } } } },
+    responses: { 200: { description: 'Updated' }, 400: { description: 'Validation error' }, 403: { description: 'Not an insurer role' }, 404: { description: 'Not found or not owned by this organization' }, ...auth401 } },
+  delete: { operationId: 'deleteInsurerOffer', tags: ['Insurer'], summary: 'Delete one of the organization\'s own partner offers',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: { 204: { description: 'Deleted' }, 403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401 } },
 };
 
 paths['/score/current'] = {
