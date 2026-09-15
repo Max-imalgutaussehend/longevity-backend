@@ -333,6 +333,7 @@ const start = async () => {
       id: user.id, email: user.email, displayName: user.displayName,
       birthDate: user.birthDate, sex: user.sex,
       chronoAge: Math.round(chronoAge * 10) / 10,
+      role: user.role, organizationId: user.organizationId,
     };
   });
 
