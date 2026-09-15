@@ -22,6 +22,8 @@ export const users = pgTable('users', {
   role: text('role').notNull().default('b2c'),
   organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'set null' }),
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  healthDataConsentAt: timestamp('health_data_consent_at', { withTimezone: true }),
+  healthDataConsentVersion: text('health_data_consent_version'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ orgIdx: index().on(t.organizationId) }));
 
@@ -113,3 +115,14 @@ export const partnerOffers = pgTable('partner_offers', {
   isDemo: boolean('is_demo').notNull().default(true),
   sortOrder: integer('sort_order').notNull().default(0),
 }, (t) => ({ orgIdx: index().on(t.organizationId) }));
+
+export const healthDataConsents = pgTable('health_data_consents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  version: text('version').notNull(),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+}, (t) => ({ userIdx: index().on(t.userId) }));
+
