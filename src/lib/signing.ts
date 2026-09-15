@@ -1,4 +1,4 @@
-import { createSign, createVerify, generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, sign, verify } from 'node:crypto';
 
 export interface SigningKeys {
   privateKey: string;
@@ -14,18 +14,12 @@ export function generateEd25519KeyPair(): SigningKeys {
 }
 
 export function signTokenPayload(payload: string, privateKeyPem: string): string {
-  const sign = createSign('SHA512');
-  sign.update(payload);
-  sign.end();
-  return sign.sign(privateKeyPem, 'base64url');
+  return sign(null, Buffer.from(payload, 'utf8'), privateKeyPem).toString('base64url');
 }
 
 export function verifyTokenSignature(payload: string, signature: string, publicKeyPem: string): boolean {
   try {
-    const verify = createVerify('SHA512');
-    verify.update(payload);
-    verify.end();
-    return verify.verify(publicKeyPem, signature, 'base64url');
+    return verify(null, Buffer.from(payload, 'utf8'), publicKeyPem, Buffer.from(signature, 'base64url'));
   } catch {
     return false;
   }
