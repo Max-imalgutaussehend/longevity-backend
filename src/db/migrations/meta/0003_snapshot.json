@@ -1,5 +1,5 @@
 {
-  "id": "3c8eb40e-ed4c-48a4-ba41-c325887ca86b",
+  "id": "b40573dd-45ea-49ea-bef7-c0bb64c71297",
   "prevId": "c17b631d-55c1-4a7f-8936-7bee4112d681",
   "version": "7",
   "dialect": "postgresql",
@@ -155,6 +155,12 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "partner_name": {
           "name": "partner_name",
           "type": "text",
@@ -185,6 +191,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "valid_from": {
+          "name": "valid_from",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valid_until": {
+          "name": "valid_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "is_demo": {
           "name": "is_demo",
           "type": "boolean",
@@ -200,8 +218,38 @@
           "default": 0
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
+      "indexes": {
+        "partner_offers_organization_id_index": {
+          "name": "partner_offers_organization_id_index",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "partner_offers_organization_id_organizations_id_fk": {
+          "name": "partner_offers_organization_id_organizations_id_fk",
+          "tableFrom": "partner_offers",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

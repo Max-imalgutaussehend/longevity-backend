@@ -89,6 +89,36 @@ paths['/insurer/overview'] = {
     responses: { 200: { description: 'Aggregate overview' }, 403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401 } },
 };
 
+paths['/insurer/offers'] = {
+  get: { operationId: 'listInsurerOffers', tags: ['Insurer'], summary: 'List the organization\'s own partner offers',
+    responses: { 200: { description: 'PartnerOffer[]' }, 403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401 } },
+  post: { operationId: 'createInsurerOffer', tags: ['Insurer'], summary: 'Create a partner offer for the organization',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['title', 'description', 'minBand', 'valueLabel'],
+      properties: {
+        title: { type: 'string' }, description: { type: 'string' }, minBand: { type: 'integer', minimum: 0, maximum: 100 },
+        valueLabel: { type: 'string' }, validFrom: { type: 'string', format: 'date-time' }, validUntil: { type: 'string', format: 'date-time' },
+      },
+    } } } },
+    responses: { 201: { description: 'Created' }, 400: { description: 'Validation error' }, 403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401 } },
+};
+
+paths['/insurer/offers/{id}'] = {
+  patch: { operationId: 'updateInsurerOffer', tags: ['Insurer'], summary: 'Update one of the organization\'s own partner offers',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' }, description: { type: 'string' }, minBand: { type: 'integer', minimum: 0, maximum: 100 },
+        valueLabel: { type: 'string' }, validFrom: { type: 'string', format: 'date-time', nullable: true }, validUntil: { type: 'string', format: 'date-time', nullable: true },
+      },
+    } } } },
+    responses: { 200: { description: 'Updated' }, 400: { description: 'Validation error' }, 403: { description: 'Not an insurer role' }, 404: { description: 'Not found or not owned by this organization' }, ...auth401 } },
+  delete: { operationId: 'deleteInsurerOffer', tags: ['Insurer'], summary: 'Delete one of the organization\'s own partner offers',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: { 204: { description: 'Deleted' }, 403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401 } },
+};
+
 paths['/score/current'] = {
   get: { operationId: 'getScoreCurrent', tags: ['Score'], summary: 'Current score + lazy snapshot',
     responses: { 200: { description: 'ScoreResult', content: { 'application/json': { schema: ref('ScoreResult') } } }, ...auth401 } },

@@ -1593,6 +1593,7 @@ const start = async () => {
   // ── Partner offers ────────────────────────────────────────────────────────────
 
   const partnerOffersHandler = async (req: FastifyRequest) => {
+    const now = new Date();
     const rows = await db.select().from(partnerOffers).orderBy(partnerOffers.sortOrder);
     const userId = req.session.userId;
 
@@ -1603,22 +1604,122 @@ const start = async () => {
         const userSamples = await getUserSamples(userId);
         const score = computeScore({
           profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
-          samples: userSamples, now: new Date(),
+          samples: userSamples, now,
         });
         band = score.band;
       }
     }
 
-    return rows.map(o => ({
-      id: o.id, partnerName: o.partnerName, title: o.title,
-      description: o.description, minBand: o.minBand,
-      valueLabel: o.valueLabel, isDemo: o.isDemo,
-      qualified: band.low >= o.minBand,
-    }));
+    return rows
+      .filter(o => (!o.validFrom || o.validFrom <= now) && (!o.validUntil || o.validUntil >= now))
+      .map(o => ({
+        id: o.id, partnerName: o.partnerName, title: o.title,
+        description: o.description, minBand: o.minBand,
+        valueLabel: o.valueLabel, isDemo: o.isDemo,
+        qualified: band.low >= o.minBand,
+      }));
   };
 
   app.get('/api/partner-offers', partnerOffersHandler);
   app.get('/api/offers', partnerOffersHandler);
+
+  // ── Insurer partner offer management ─────────────────────────────────────────
+
+  app.get('/api/insurer/offers', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const rows = await db.select().from(partnerOffers)
+      .where(eq(partnerOffers.organizationId, user.organizationId))
+      .orderBy(partnerOffers.sortOrder);
+
+    return rows.map(o => ({
+      id: o.id, title: o.title, description: o.description, minBand: o.minBand,
+      valueLabel: o.valueLabel,
+      validFrom: o.validFrom?.toISOString() ?? null,
+      validUntil: o.validUntil?.toISOString() ?? null,
+    }));
+  });
+
+  app.post('/api/insurer/offers', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const body = req.body as { title?: string; description?: string; minBand?: number; valueLabel?: string; validFrom?: string; validUntil?: string };
+    const { title, description, minBand, valueLabel, validFrom, validUntil } = body;
+
+    if (!title || !description || minBand === undefined || !valueLabel) {
+      return reply.status(400).send({ title: 'Pflichtfelder fehlen.' });
+    }
+    if (minBand < 0 || minBand > 100) {
+      return reply.status(400).send({ title: 'Mindest-Score-Band muss zwischen 0 und 100 liegen.' });
+    }
+
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, user.organizationId)).limit(1);
+
+    const [offer] = await db.insert(partnerOffers).values({
+      organizationId: user.organizationId,
+      partnerName: org?.name ?? 'Krankenkasse',
+      title, description, minBand, valueLabel,
+      validFrom: validFrom ? new Date(validFrom) : null,
+      validUntil: validUntil ? new Date(validUntil) : null,
+      isDemo: false,
+    }).returning();
+
+    return reply.status(201).send({
+      id: offer.id, title: offer.title, description: offer.description, minBand: offer.minBand,
+      valueLabel: offer.valueLabel,
+      validFrom: offer.validFrom?.toISOString() ?? null,
+      validUntil: offer.validUntil?.toISOString() ?? null,
+    });
+  });
+
+  app.patch('/api/insurer/offers/:id', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const { id } = req.params as { id: string };
+    const body = req.body as { title?: string; description?: string; minBand?: number; valueLabel?: string; validFrom?: string | null; validUntil?: string | null };
+
+    if (body.minBand !== undefined && (body.minBand < 0 || body.minBand > 100)) {
+      return reply.status(400).send({ title: 'Mindest-Score-Band muss zwischen 0 und 100 liegen.' });
+    }
+
+    const [existing] = await db.select().from(partnerOffers)
+      .where(and(eq(partnerOffers.id, id), eq(partnerOffers.organizationId, user.organizationId)))
+      .limit(1);
+    if (!existing) return reply.status(404).send({ title: 'Angebot nicht gefunden.' });
+
+    const [updated] = await db.update(partnerOffers).set({
+      ...(body.title !== undefined && { title: body.title }),
+      ...(body.description !== undefined && { description: body.description }),
+      ...(body.minBand !== undefined && { minBand: body.minBand }),
+      ...(body.valueLabel !== undefined && { valueLabel: body.valueLabel }),
+      ...(body.validFrom !== undefined && { validFrom: body.validFrom ? new Date(body.validFrom) : null }),
+      ...(body.validUntil !== undefined && { validUntil: body.validUntil ? new Date(body.validUntil) : null }),
+    }).where(eq(partnerOffers.id, id)).returning();
+
+    return {
+      id: updated.id, title: updated.title, description: updated.description, minBand: updated.minBand,
+      valueLabel: updated.valueLabel,
+      validFrom: updated.validFrom?.toISOString() ?? null,
+      validUntil: updated.validUntil?.toISOString() ?? null,
+    };
+  });
+
+  app.delete('/api/insurer/offers/:id', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const { id } = req.params as { id: string };
+    await db.delete(partnerOffers)
+      .where(and(eq(partnerOffers.id, id), eq(partnerOffers.organizationId, user.organizationId)));
+    return reply.status(204).send();
+  });
 
   try {
     await app.listen({ port: 3000, host: '0.0.0.0' });

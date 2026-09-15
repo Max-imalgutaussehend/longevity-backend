@@ -102,11 +102,14 @@ export const shareTokens = pgTable('share_tokens', {
 
 export const partnerOffers = pgTable('partner_offers', {
   id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
   partnerName: text('partner_name').notNull(),
   title: text('title').notNull(),
   description: text('description').notNull(),
   minBand: integer('min_band').notNull(),
   valueLabel: text('value_label').notNull(),
+  validFrom: timestamp('valid_from', { withTimezone: true }),
+  validUntil: timestamp('valid_until', { withTimezone: true }),
   isDemo: boolean('is_demo').notNull().default(true),
   sortOrder: integer('sort_order').notNull().default(0),
-});
+}, (t) => ({ orgIdx: index().on(t.organizationId) }));
