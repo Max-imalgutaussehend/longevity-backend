@@ -3,6 +3,7 @@ import { hash } from '@node-rs/argon2';
 import { db } from '../db/client.js';
 import { organizations, users, emailTokens } from '../db/schema.js';
 import { sendMail } from '../lib/mail.js';
+import { insurerInviteTemplate } from '../lib/emailTemplates.js';
 import { env } from '../env.js';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -42,11 +43,7 @@ async function main() {
   const baseUrl = env.PUBLIC_BASE_URL ?? 'http://localhost:5173';
   const inviteUrl = `${baseUrl}/insurer-invite/${token}`;
 
-  await sendMail({
-    to: contactEmail,
-    subject: 'Einladung: LONGEVITY-Zugang für Krankenkassen',
-    html: `<p>Hallo,</p><p>Sie wurden als Krankenkassen-Administrator für <strong>${orgName}</strong> bei LONGEVITY eingeladen.</p><p>Bitte legen Sie über folgenden Link Ihr Passwort fest, um den Zugang zu aktivieren:</p><p><a href="${inviteUrl}">${inviteUrl}</a></p><p>Der Link ist 7 Tage gültig.</p>`,
-  });
+  await sendMail({ to: contactEmail, ...insurerInviteTemplate(orgName, inviteUrl) });
 
   console.log(`Organisation "${orgName}" angelegt (${org.id}).`);
   console.log(`Insurer-Admin ${contactEmail} angelegt (${user.id}), Einladung verschickt.`);
