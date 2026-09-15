@@ -47,6 +47,22 @@ paths['/auth/resend-verification'] = {
     responses: { 200: { description: 'OK' }, 400: { description: 'Already verified' }, ...auth401 } },
 };
 
+paths['/auth/request-password-reset'] = {
+  post: { operationId: 'requestPasswordReset', tags: ['Auth'], security: publicSecurity, summary: 'Request a password reset link — always returns 200 to avoid leaking whether an email is registered',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['email'], properties: { email: { type: 'string', format: 'email' } },
+    } } } },
+    responses: { 200: { description: 'OK' }, 400: { description: 'Missing email' }, 429: { description: 'Rate limited' } } },
+};
+
+paths['/auth/reset-password'] = {
+  post: { operationId: 'resetPassword', tags: ['Auth'], security: publicSecurity, summary: 'Set a new password using a reset token',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['token', 'password'], properties: { token: { type: 'string' }, password: { type: 'string', minLength: 10 } },
+    } } } },
+    responses: { 200: { description: 'OK' }, 400: { description: 'Invalid, expired or used token, or weak password' } } },
+};
+
 paths['/auth/google/url'] = {
   post: { operationId: 'getGoogleAuthUrl', tags: ['Auth'], security: publicSecurity, summary: 'Get Google OAuth login URL',
     responses: { 200: { description: 'Google Auth URL', content: { 'application/json': { schema: { type: 'object', properties: { url: { type: 'string', nullable: true } } } } } } } },

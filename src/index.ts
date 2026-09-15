@@ -276,6 +276,56 @@ const start = async () => {
     return reply.status(200).send({ ok: true });
   });
 
+  app.post('/api/auth/request-password-reset', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
+    const { email } = req.body as { email?: string };
+    if (!email) return reply.status(400).send({ title: 'E-Mail erforderlich.' });
+
+    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    if (user) {
+      const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+      const token = await issueEmailToken(user.id, 'reset_password');
+      const resetUrl = `${baseUrl}/reset-password/${token}`;
+      await sendMail({
+        to: user.email,
+        subject: 'Passwort zurücksetzen',
+        html: `<p>Du hast ein neues Passwort angefordert. Klicke auf den folgenden Link, um ein neues Passwort zu setzen:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>Der Link ist eine Stunde gültig. Falls du das nicht warst, kannst du diese E-Mail ignorieren.</p>`,
+      });
+    }
+
+    // Immer gleiche Antwort — verhindert, dass sich per Response feststellen lässt, ob eine E-Mail-Adresse registriert ist.
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/api/auth/reset-password', async (req, reply) => {
+    const { token, password } = req.body as { token?: string; password?: string };
+    if (!token || !password) return reply.status(400).send({ title: 'Token und Passwort erforderlich.' });
+    if (password.length < 10) return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
+    if (isWeakPassword(password)) return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
+
+    const result = await consumeEmailToken(token, 'reset_password');
+    if (!result.ok) {
+      const reasonTitle = result.reason === 'expired'
+        ? 'Der Link zum Zurücksetzen ist abgelaufen.'
+        : result.reason === 'used'
+        ? 'Dieser Link wurde bereits verwendet.'
+        : 'Ungültiger Link.';
+      return reply.status(400).send({ title: reasonTitle });
+    }
+
+    const passwordHash = await hash(password);
+    await db.update(users).set({ passwordHash }).where(eq(users.id, result.userId));
+
+    return reply.status(200).send({ ok: true });
+  });
+
   app.post('/api/auth/login', {
     config: {
       rateLimit: {
