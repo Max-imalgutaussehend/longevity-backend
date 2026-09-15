@@ -129,7 +129,9 @@ describe.skipIf(!HAS_DB)('Sources deactivation and deletion — integration', ()
 
   it('determines connected status based on adapter and credentials', async () => {
     const rows = await db.select().from(tables.sources).where(eq(tables.sources.userId, testUserId));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const gRow = rows.find((r: any) => r.id === googleSourceId);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mRow = rows.find((r: any) => r.id === mockSourceId);
 
     // Google Fit has no credentials in this test -> connected is false
