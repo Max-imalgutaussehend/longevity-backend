@@ -414,6 +414,184 @@
         }
       }
     },
+    "/auth/verify-email": {
+      "post": {
+        "operationId": "verifyEmail",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "summary": "Confirm email verification token",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Invalid, expired or used token"
+          }
+        }
+      }
+    },
+    "/auth/resend-verification": {
+      "post": {
+        "operationId": "resendVerification",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Resend the email verification link",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Already verified"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/auth/request-password-reset": {
+      "post": {
+        "operationId": "requestPasswordReset",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "summary": "Request a password reset link — always returns 200 to avoid leaking whether an email is registered",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Missing email"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/auth/reset-password": {
+      "post": {
+        "operationId": "resetPassword",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "summary": "Set a new password using a reset token",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token",
+                  "password"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Invalid, expired or used token, or weak password"
+          }
+        }
+      }
+    },
+    "/auth/accept-invite": {
+      "post": {
+        "operationId": "acceptInsurerInvite",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "summary": "Accept an insurer admin invitation and set a password",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token",
+                  "password"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Invalid, expired or used token, or weak password"
+          }
+        }
+      }
+    },
     "/auth/google/url": {
       "post": {
         "operationId": "getGoogleAuthUrl",
@@ -483,6 +661,280 @@
           },
           "401": {
             "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/organizations/join": {
+      "post": {
+        "operationId": "joinOrganization",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "Link the current b2c user to an organization via join code",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "joinCode"
+                ],
+                "properties": {
+                  "joinCode": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not a b2c user"
+          },
+          "404": {
+            "description": "Invalid join code"
+          }
+        }
+      }
+    },
+    "/organizations/leave": {
+      "post": {
+        "operationId": "leaveOrganization",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "Unlink the current b2c user from their organization",
+        "responses": {
+          "204": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not a b2c user"
+          }
+        }
+      }
+    },
+    "/insurer/overview": {
+      "get": {
+        "operationId": "getInsurerOverview",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "Aggregate member metrics for the insurer dashboard — never individual health data",
+        "responses": {
+          "200": {
+            "description": "Aggregate overview"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not an insurer role"
+          },
+          "404": {
+            "description": "No organization assigned"
+          }
+        }
+      }
+    },
+    "/insurer/offers": {
+      "get": {
+        "operationId": "listInsurerOffers",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "List the organization's own partner offers",
+        "responses": {
+          "200": {
+            "description": "PartnerOffer[]"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not an insurer role"
+          },
+          "404": {
+            "description": "No organization assigned"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createInsurerOffer",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "Create a partner offer for the organization",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "description",
+                  "minBand",
+                  "valueLabel"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "minBand": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "valueLabel": {
+                    "type": "string"
+                  },
+                  "validFrom": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "validUntil": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not an insurer role"
+          },
+          "404": {
+            "description": "No organization assigned"
+          }
+        }
+      }
+    },
+    "/insurer/offers/{id}": {
+      "patch": {
+        "operationId": "updateInsurerOffer",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "Update one of the organization's own partner offers",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "minBand": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "valueLabel": {
+                    "type": "string"
+                  },
+                  "validFrom": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "validUntil": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not an insurer role"
+          },
+          "404": {
+            "description": "Not found or not owned by this organization"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteInsurerOffer",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "Delete one of the organization's own partner offers",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not an insurer role"
+          },
+          "404": {
+            "description": "No organization assigned"
           }
         }
       }

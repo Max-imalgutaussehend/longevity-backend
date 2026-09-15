@@ -6,14 +6,18 @@ import multipart from '@fastify/multipart';
 import { z } from 'zod';
 import { env } from './env.js';
 import { db } from './db/client.js';
-import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots } from './db/schema.js';
-import { eq, desc, and, gte, asc, sql } from 'drizzle-orm';
+import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots, organizations } from './db/schema.js';
+import type { Role } from './db/schema.js';
+import { eq, desc, and, gte, asc, sql, inArray } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
 import { computeScore, simulate, suggestLevers } from './score/index.js';
 import { METRICS } from './score/metrics.js';
 import { generate } from './mock/generate.js';
 import { isWeakPassword } from './lib/weakPasswords.js';
 import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
+import { issueEmailToken, consumeEmailToken } from './lib/emailTokens.js';
+import { sendMail } from './lib/mail.js';
+import { verifyEmailTemplate, passwordResetTemplate } from './lib/emailTemplates.js';
 
 const METRIC_LABELS: Record<string, string> = {
   vo2max: 'VO₂max',
@@ -72,6 +76,16 @@ async function requireUser(req: FastifyRequest, reply: FastifyReply) {
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!user) {
     reply.status(401).send({ title: 'Benutzer nicht gefunden.' });
+    return null;
+  }
+  return user;
+}
+
+async function requireRole(req: FastifyRequest, reply: FastifyReply, roles: readonly Role[]) {
+  const user = await requireUser(req, reply);
+  if (!user) return null;
+  if (!roles.includes(user.role as Role)) {
+    reply.status(403).send({ title: 'Keine Berechtigung für diese Aktion.' });
     return null;
   }
   return user;
@@ -223,7 +237,123 @@ const start = async () => {
     }
 
     req.session.userId = user.id;
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const token = await issueEmailToken(user.id, 'verify_email');
+    const verifyUrl = `${baseUrl}/verify-email/${token}`;
+    try {
+      await sendMail({ to: user.email, ...verifyEmailTemplate(verifyUrl) });
+    } catch (err) {
+      req.log.error(err, 'Verifikations-E-Mail konnte nicht gesendet werden');
+    }
+
     return reply.status(201).send({ id: user.id, email: user.email });
+  });
+
+  app.post('/api/auth/verify-email', async (req, reply) => {
+    const { token } = req.body as { token?: string };
+    if (!token) return reply.status(400).send({ title: 'Token fehlt.' });
+
+    const result = await consumeEmailToken(token, 'verify_email');
+    if (!result.ok) {
+      const reasonTitle = result.reason === 'expired'
+        ? 'Der Verifikationslink ist abgelaufen.'
+        : result.reason === 'used'
+        ? 'Der Verifikationslink wurde bereits verwendet.'
+        : 'Ungültiger Verifikationslink.';
+      return reply.status(400).send({ title: reasonTitle });
+    }
+
+    await db.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.id, result.userId));
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/api/auth/resend-verification', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (user.emailVerifiedAt) return reply.status(400).send({ title: 'E-Mail ist bereits bestätigt.' });
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const token = await issueEmailToken(user.id, 'verify_email');
+    const verifyUrl = `${baseUrl}/verify-email/${token}`;
+    await sendMail({ to: user.email, ...verifyEmailTemplate(verifyUrl) });
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/api/auth/request-password-reset', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
+    const { email } = req.body as { email?: string };
+    if (!email) return reply.status(400).send({ title: 'E-Mail erforderlich.' });
+
+    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    if (user) {
+      const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+      const token = await issueEmailToken(user.id, 'reset_password');
+      const resetUrl = `${baseUrl}/reset-password/${token}`;
+      await sendMail({ to: user.email, ...passwordResetTemplate(resetUrl) });
+    }
+
+    // Immer gleiche Antwort — verhindert, dass sich per Response feststellen lässt, ob eine E-Mail-Adresse registriert ist.
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/api/auth/reset-password', async (req, reply) => {
+    const { token, password } = req.body as { token?: string; password?: string };
+    if (!token || !password) return reply.status(400).send({ title: 'Token und Passwort erforderlich.' });
+    if (password.length < 10) return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
+    if (isWeakPassword(password)) return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
+
+    const result = await consumeEmailToken(token, 'reset_password');
+    if (!result.ok) {
+      const reasonTitle = result.reason === 'expired'
+        ? 'Der Link zum Zurücksetzen ist abgelaufen.'
+        : result.reason === 'used'
+        ? 'Dieser Link wurde bereits verwendet.'
+        : 'Ungültiger Link.';
+      return reply.status(400).send({ title: reasonTitle });
+    }
+
+    const passwordHash = await hash(password);
+    await db.update(users).set({ passwordHash }).where(eq(users.id, result.userId));
+
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/api/auth/accept-invite', async (req, reply) => {
+    const { token, password } = req.body as { token?: string; password?: string };
+    if (!token || !password) return reply.status(400).send({ title: 'Token und Passwort erforderlich.' });
+    if (password.length < 10) return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
+    if (isWeakPassword(password)) return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
+
+    const result = await consumeEmailToken(token, 'insurer_invite');
+    if (!result.ok) {
+      const reasonTitle = result.reason === 'expired'
+        ? 'Die Einladung ist abgelaufen.'
+        : result.reason === 'used'
+        ? 'Diese Einladung wurde bereits verwendet.'
+        : 'Ungültiger Einladungslink.';
+      return reply.status(400).send({ title: reasonTitle });
+    }
+
+    const passwordHash = await hash(password);
+    const [user] = await db.update(users)
+      .set({ passwordHash, emailVerifiedAt: new Date() })
+      .where(eq(users.id, result.userId))
+      .returning();
+
+    if (user.organizationId) {
+      await db.update(organizations).set({ status: 'active' }).where(eq(organizations.id, user.organizationId));
+    }
+
+    req.session.userId = user.id;
+    return reply.status(200).send({ ok: true });
   });
 
   app.post('/api/auth/login', {
@@ -333,6 +463,80 @@ const start = async () => {
       id: user.id, email: user.email, displayName: user.displayName,
       birthDate: user.birthDate, sex: user.sex,
       chronoAge: Math.round(chronoAge * 10) / 10,
+      role: user.role, organizationId: user.organizationId,
+      emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
+    };
+  });
+
+  app.post('/api/organizations/join', async (req, reply) => {
+    const user = await requireRole(req, reply, ['b2c']);
+    if (!user) return;
+
+    const { joinCode } = req.body as { joinCode?: string };
+    if (!joinCode) return reply.status(400).send({ title: 'Beitrittscode erforderlich.' });
+
+    const [org] = await db.select().from(organizations).where(eq(organizations.joinCode, joinCode)).limit(1);
+    if (!org || org.status !== 'active') {
+      return reply.status(404).send({ title: 'Ungültiger Beitrittscode.' });
+    }
+
+    await db.update(users).set({ organizationId: org.id }).where(eq(users.id, user.id));
+    return reply.status(200).send({ ok: true, organizationName: org.name });
+  });
+
+  app.post('/api/organizations/leave', async (req, reply) => {
+    const user = await requireRole(req, reply, ['b2c']);
+    if (!user) return;
+    await db.update(users).set({ organizationId: null }).where(eq(users.id, user.id));
+    return reply.status(204).send();
+  });
+
+  app.get('/api/insurer/overview', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const members = await db.select({ id: users.id, birthDate: users.birthDate, sex: users.sex })
+      .from(users)
+      .where(and(eq(users.organizationId, user.organizationId), eq(users.role, 'b2c')));
+
+    const memberIds = members.map((m) => m.id);
+    const activeMemberCount = memberIds.length;
+
+    let averageScore: number | null = null;
+    let averageCoverage: number | null = null;
+    let membersWithScoreCount = 0;
+
+    if (memberIds.length > 0) {
+      const latestPerMember = await db
+        .select({ userId: scoreSnapshots.userId, score: scoreSnapshots.score, coverage: scoreSnapshots.coverage, computedFor: scoreSnapshots.computedFor })
+        .from(scoreSnapshots)
+        .where(inArray(scoreSnapshots.userId, memberIds))
+        .orderBy(desc(scoreSnapshots.computedFor));
+
+      const latestByUser = new Map<string, { score: number; coverage: number }>();
+      for (const row of latestPerMember) {
+        if (!latestByUser.has(row.userId)) {
+          latestByUser.set(row.userId, { score: row.score, coverage: row.coverage });
+        }
+      }
+
+      const scores = [...latestByUser.values()];
+      membersWithScoreCount = scores.length;
+      if (scores.length > 0) {
+        averageScore = Math.round((scores.reduce((sum, s) => sum + s.score, 0) / scores.length) * 10) / 10;
+        averageCoverage = Math.round((scores.reduce((sum, s) => sum + s.coverage, 0) / scores.length) * 100) / 100;
+      }
+    }
+
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, user.organizationId)).limit(1);
+
+    return {
+      organizationName: org?.name ?? null,
+      activeMemberCount,
+      averageScore,
+      averageCoverage,
+      membersWithScoreCount,
     };
   });
 
@@ -1495,6 +1699,7 @@ const start = async () => {
   // ── Partner offers ────────────────────────────────────────────────────────────
 
   const partnerOffersHandler = async (req: FastifyRequest) => {
+    const now = new Date();
     const rows = await db.select().from(partnerOffers).orderBy(partnerOffers.sortOrder);
     const userId = req.session.userId;
 
@@ -1505,22 +1710,122 @@ const start = async () => {
         const userSamples = await getUserSamples(userId);
         const score = computeScore({
           profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
-          samples: userSamples, now: new Date(),
+          samples: userSamples, now,
         });
         band = score.band;
       }
     }
 
-    return rows.map(o => ({
-      id: o.id, partnerName: o.partnerName, title: o.title,
-      description: o.description, minBand: o.minBand,
-      valueLabel: o.valueLabel, isDemo: o.isDemo,
-      qualified: band.low >= o.minBand,
-    }));
+    return rows
+      .filter(o => (!o.validFrom || o.validFrom <= now) && (!o.validUntil || o.validUntil >= now))
+      .map(o => ({
+        id: o.id, partnerName: o.partnerName, title: o.title,
+        description: o.description, minBand: o.minBand,
+        valueLabel: o.valueLabel, isDemo: o.isDemo,
+        qualified: band.low >= o.minBand,
+      }));
   };
 
   app.get('/api/partner-offers', partnerOffersHandler);
   app.get('/api/offers', partnerOffersHandler);
+
+  // ── Insurer partner offer management ─────────────────────────────────────────
+
+  app.get('/api/insurer/offers', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const rows = await db.select().from(partnerOffers)
+      .where(eq(partnerOffers.organizationId, user.organizationId))
+      .orderBy(partnerOffers.sortOrder);
+
+    return rows.map(o => ({
+      id: o.id, title: o.title, description: o.description, minBand: o.minBand,
+      valueLabel: o.valueLabel,
+      validFrom: o.validFrom?.toISOString() ?? null,
+      validUntil: o.validUntil?.toISOString() ?? null,
+    }));
+  });
+
+  app.post('/api/insurer/offers', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const body = req.body as { title?: string; description?: string; minBand?: number; valueLabel?: string; validFrom?: string; validUntil?: string };
+    const { title, description, minBand, valueLabel, validFrom, validUntil } = body;
+
+    if (!title || !description || minBand === undefined || !valueLabel) {
+      return reply.status(400).send({ title: 'Pflichtfelder fehlen.' });
+    }
+    if (minBand < 0 || minBand > 100) {
+      return reply.status(400).send({ title: 'Mindest-Score-Band muss zwischen 0 und 100 liegen.' });
+    }
+
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, user.organizationId)).limit(1);
+
+    const [offer] = await db.insert(partnerOffers).values({
+      organizationId: user.organizationId,
+      partnerName: org?.name ?? 'Krankenkasse',
+      title, description, minBand, valueLabel,
+      validFrom: validFrom ? new Date(validFrom) : null,
+      validUntil: validUntil ? new Date(validUntil) : null,
+      isDemo: false,
+    }).returning();
+
+    return reply.status(201).send({
+      id: offer.id, title: offer.title, description: offer.description, minBand: offer.minBand,
+      valueLabel: offer.valueLabel,
+      validFrom: offer.validFrom?.toISOString() ?? null,
+      validUntil: offer.validUntil?.toISOString() ?? null,
+    });
+  });
+
+  app.patch('/api/insurer/offers/:id', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const { id } = req.params as { id: string };
+    const body = req.body as { title?: string; description?: string; minBand?: number; valueLabel?: string; validFrom?: string | null; validUntil?: string | null };
+
+    if (body.minBand !== undefined && (body.minBand < 0 || body.minBand > 100)) {
+      return reply.status(400).send({ title: 'Mindest-Score-Band muss zwischen 0 und 100 liegen.' });
+    }
+
+    const [existing] = await db.select().from(partnerOffers)
+      .where(and(eq(partnerOffers.id, id), eq(partnerOffers.organizationId, user.organizationId)))
+      .limit(1);
+    if (!existing) return reply.status(404).send({ title: 'Angebot nicht gefunden.' });
+
+    const [updated] = await db.update(partnerOffers).set({
+      ...(body.title !== undefined && { title: body.title }),
+      ...(body.description !== undefined && { description: body.description }),
+      ...(body.minBand !== undefined && { minBand: body.minBand }),
+      ...(body.valueLabel !== undefined && { valueLabel: body.valueLabel }),
+      ...(body.validFrom !== undefined && { validFrom: body.validFrom ? new Date(body.validFrom) : null }),
+      ...(body.validUntil !== undefined && { validUntil: body.validUntil ? new Date(body.validUntil) : null }),
+    }).where(eq(partnerOffers.id, id)).returning();
+
+    return {
+      id: updated.id, title: updated.title, description: updated.description, minBand: updated.minBand,
+      valueLabel: updated.valueLabel,
+      validFrom: updated.validFrom?.toISOString() ?? null,
+      validUntil: updated.validUntil?.toISOString() ?? null,
+    };
+  });
+
+  app.delete('/api/insurer/offers/:id', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const { id } = req.params as { id: string };
+    await db.delete(partnerOffers)
+      .where(and(eq(partnerOffers.id, id), eq(partnerOffers.organizationId, user.organizationId)));
+    return reply.status(204).send();
+  });
 
   try {
     await app.listen({ port: 3000, host: '0.0.0.0' });
