@@ -17,6 +17,7 @@ import { isWeakPassword } from './lib/weakPasswords.js';
 import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
 import { issueEmailToken, consumeEmailToken } from './lib/emailTokens.js';
 import { sendMail } from './lib/mail.js';
+import { verifyEmailTemplate, passwordResetTemplate } from './lib/emailTemplates.js';
 
 const METRIC_LABELS: Record<string, string> = {
   vo2max: 'VO₂max',
@@ -241,11 +242,7 @@ const start = async () => {
     const token = await issueEmailToken(user.id, 'verify_email');
     const verifyUrl = `${baseUrl}/verify-email/${token}`;
     try {
-      await sendMail({
-        to: user.email,
-        subject: 'Bitte bestätige deine E-Mail-Adresse',
-        html: `<p>Willkommen bei LONGEVITY!</p><p>Bitte bestätige deine E-Mail-Adresse, um dein Konto vollständig zu nutzen:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>Der Link ist eine Stunde gültig.</p>`,
-      });
+      await sendMail({ to: user.email, ...verifyEmailTemplate(verifyUrl) });
     } catch (err) {
       req.log.error(err, 'Verifikations-E-Mail konnte nicht gesendet werden');
     }
@@ -279,11 +276,7 @@ const start = async () => {
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const token = await issueEmailToken(user.id, 'verify_email');
     const verifyUrl = `${baseUrl}/verify-email/${token}`;
-    await sendMail({
-      to: user.email,
-      subject: 'Bitte bestätige deine E-Mail-Adresse',
-      html: `<p>Bitte bestätige deine E-Mail-Adresse:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>Der Link ist eine Stunde gültig.</p>`,
-    });
+    await sendMail({ to: user.email, ...verifyEmailTemplate(verifyUrl) });
     return reply.status(200).send({ ok: true });
   });
 
@@ -304,11 +297,7 @@ const start = async () => {
       const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
       const token = await issueEmailToken(user.id, 'reset_password');
       const resetUrl = `${baseUrl}/reset-password/${token}`;
-      await sendMail({
-        to: user.email,
-        subject: 'Passwort zurücksetzen',
-        html: `<p>Du hast ein neues Passwort angefordert. Klicke auf den folgenden Link, um ein neues Passwort zu setzen:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>Der Link ist eine Stunde gültig. Falls du das nicht warst, kannst du diese E-Mail ignorieren.</p>`,
-      });
+      await sendMail({ to: user.email, ...passwordResetTemplate(resetUrl) });
     }
 
     // Immer gleiche Antwort — verhindert, dass sich per Response feststellen lässt, ob eine E-Mail-Adresse registriert ist.
