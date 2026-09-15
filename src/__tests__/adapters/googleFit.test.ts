@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseGoogleFitAggregate, parseGoogleHealthV4DataPoints, type GoogleFitAggregateResponse } from '../../adapters/googleFit.js';
+import { parseGoogleFitAggregate, parseGoogleHealthV4DataPoints, consolidateDailyZone2Samples, type GoogleFitAggregateResponse } from '../../adapters/googleFit.js';
 import rawFixture from '../__fixtures__/google_fit_aggregate.json';
 
 const fixture = rawFixture as GoogleFitAggregateResponse;
@@ -229,6 +229,131 @@ describe('parseGoogleHealthV4DataPoints', () => {
     });
     expect(samples).toHaveLength(1);
     expect(new Date(samples[0].measuredAt).getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('deduplicates steps across multiple origins prioritizing Google Fit and does not sum them', () => {
+    const samples = parseGoogleHealthV4DataPoints('steps', [
+      {
+        steps: {
+          count: '12808',
+          interval: {
+            startTime: '2026-09-13T00:00:00Z',
+            endTime: '2026-09-13T23:59:59Z',
+            civilStartTime: { date: { year: 2026, month: 9, day: 13 } },
+          },
+        },
+        metadata: {
+          dataOrigin: { packageName: 'com.google.android.apps.fitness' },
+        },
+      },
+      {
+        steps: {
+          count: '16215',
+          interval: {
+            startTime: '2026-09-13T00:00:00Z',
+            endTime: '2026-09-13T23:59:59Z',
+            civilStartTime: { date: { year: 2026, month: 9, day: 13 } },
+          },
+        },
+        metadata: {
+          dataOrigin: { packageName: 'com.sec.android.app.shealth' },
+        },
+      },
+    ]);
+
+    expect(samples).toHaveLength(1);
+    expect(samples[0].value).toBe(12808);
+  });
+
+  it('does not sum full-day cumulative step records with intraday deltas', () => {
+    const samples = parseGoogleHealthV4DataPoints('steps', [
+      {
+        steps: {
+          count: '12808',
+          interval: {
+            startTime: '2026-09-13T00:00:00Z',
+            endTime: '2026-09-13T23:59:59Z',
+            civilStartTime: { date: { year: 2026, month: 9, day: 13 } },
+          },
+        },
+      },
+      {
+        steps: {
+          count: '4000',
+          interval: {
+            startTime: '2026-09-13T08:00:00Z',
+            endTime: '2026-09-13T09:00:00Z',
+            civilStartTime: { date: { year: 2026, month: 9, day: 13 } },
+          },
+        },
+      },
+      {
+        steps: {
+          count: '6000',
+          interval: {
+            startTime: '2026-09-13T14:00:00Z',
+            endTime: '2026-09-13T15:00:00Z',
+            civilStartTime: { date: { year: 2026, month: 9, day: 13 } },
+          },
+        },
+      },
+    ]);
+
+    expect(samples).toHaveLength(1);
+    expect(samples[0].value).toBe(12808);
+  });
+
+  it('aggregates multiple individual 1-minute active-minutes slices into a single daily sample', () => {
+    // Simulating Google Health Connect v4 sending individual 1-minute active slices
+    const rawPoints = Array.from({ length: 60 }, (_, i) => ({
+      activeMinutes: {
+        interval: {
+          startTime: `2026-09-13T14:${String(i).padStart(2, '0')}:00Z`,
+          endTime: `2026-09-13T14:${String(i).padStart(2, '0')}:59Z`,
+        },
+        activeMinutesByActivityLevel: [{ activeMinutes: 1 }],
+      },
+    }));
+
+    const samples = parseGoogleHealthV4DataPoints('active-minutes', rawPoints);
+    expect(samples).toHaveLength(1);
+    expect(samples[0].value).toBe(60);
+    expect(samples[0].metric).toBe('zone2_minutes');
+  });
+
+  it('consolidates daily zone2_minutes taking the maximum between exercise and active minutes', () => {
+    const rawSamples = [
+      {
+        metric: 'zone2_minutes' as const,
+        value: 98.7,
+        unit: 'min',
+        measuredAt: '2026-09-13T12:00:00.000Z',
+        sourceKind: 'google_fit' as const,
+      },
+      {
+        metric: 'zone2_minutes' as const,
+        value: 120,
+        unit: 'min',
+        measuredAt: '2026-09-13T12:00:00.000Z',
+        sourceKind: 'google_fit' as const,
+      },
+      {
+        metric: 'steps' as const,
+        value: 12808,
+        unit: 'steps',
+        measuredAt: '2026-09-13T12:00:00.000Z',
+        sourceKind: 'google_fit' as const,
+      },
+    ];
+
+    const consolidated = consolidateDailyZone2Samples(rawSamples);
+    const zone2 = consolidated.filter(s => s.metric === 'zone2_minutes');
+    expect(zone2).toHaveLength(1);
+    expect(zone2[0].value).toBe(120);
+
+    const steps = consolidated.filter(s => s.metric === 'steps');
+    expect(steps).toHaveLength(1);
+    expect(steps[0].value).toBe(12808);
   });
 });
 

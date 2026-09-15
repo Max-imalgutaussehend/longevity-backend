@@ -690,6 +690,7 @@ const start = async () => {
 
     return rows.map(s => ({
       id: s.id, kind: s.kind, adapter: s.adapter, enabled: s.enabled,
+      connected: s.adapter === 'mock' ? true : s.credentials !== null,
       lastSyncAt: s.lastSyncAt?.toISOString() ?? null,
       sampleCount: countMap.get(s.id) ?? 0,
     }));
@@ -1127,28 +1128,43 @@ const start = async () => {
       .limit(1);
 
     if (!src) return reply.status(404).send({ title: 'Withings ist nicht verbunden.' });
-
-    const accessToken = await getValidToken(src.id, oauthProviders.withings);
-    const parsedSamples = await fetchWithingsSamples(accessToken);
-
-    let inserted = 0;
-    for (const s of parsedSamples) {
-      await db.insert(samples).values({
-        userId: user.id, sourceId: src.id,
-        metric: s.metric, value: s.value, unit: s.unit,
-        measuredAt: new Date(s.measuredAt),
-      }).onConflictDoNothing();
-      inserted++;
+    if (!src.credentials) {
+      return reply.status(400).send({
+        title: 'Withings ist nicht verknüpft oder die Autorisierung wurde getrennt. Bitte verbinde Withings erneut.',
+      });
     }
 
-    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+    try {
+      const accessToken = await getValidToken(src.id, oauthProviders.withings);
+      const parsedSamples = await fetchWithingsSamples(accessToken);
 
-    return { inserted, sourceId: src.id };
+      let inserted = 0;
+      for (const s of parsedSamples) {
+        await db.insert(samples).values({
+          userId: user.id, sourceId: src.id,
+          metric: s.metric, value: s.value, unit: s.unit,
+          measuredAt: new Date(s.measuredAt),
+        }).onConflictDoNothing();
+        inserted++;
+      }
+
+      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+
+      return { inserted, sourceId: src.id };
+    } catch (err: unknown) {
+      req.log.error(err, 'Withings sync failed');
+      const msg = err instanceof Error ? err.message : 'Synchronisation fehlgeschlagen.';
+      return reply.status(400).send({
+        title: msg.includes('OAuth') || msg.includes('token') || msg.includes('credential')
+          ? 'Withings-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Withings erneut.'
+          : `Withings-Synchronisation fehlgeschlagen: ${msg}`,
+      });
+    }
   });
 
-  // ── Google Fit sync (Issue #37) ──────────────────────────────────────────────
+  // ── Google Fit / Google Health sync (Issue #37) ──────────────────────────────
 
-  app.post('/api/sources/google-fit/sync', async (req, reply) => {
+  const handleGoogleSync = async (req: FastifyRequest, reply: FastifyReply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
 
@@ -1156,16 +1172,36 @@ const start = async () => {
       .where(and(eq(sources.userId, user.id), eq(sources.kind, 'google_fit')))
       .limit(1);
 
-    if (!src) return reply.status(404).send({ title: 'Google Fit ist nicht verbunden.' });
+    if (!src) return reply.status(404).send({ title: 'Google Health ist nicht verbunden.' });
+    if (!src.credentials) {
+      return reply.status(400).send({
+        title: 'Google Health ist nicht verknüpft oder die Autorisierung wurde getrennt. Bitte verbinde dein Google-Konto erneut.',
+      });
+    }
 
-    const accessToken = await getValidToken(src.id, oauthProviders['google-fit']);
-    const parsedSamples = await fetchGoogleFitSamples(accessToken);
-    const inserted = await upsertGoogleFitSamples(user.id, src.id, parsedSamples);
+    try {
+      const providerKey = (src.adapter && oauthProviders[src.adapter]) ? src.adapter : 'google-fit';
+      const provider = oauthProviders[providerKey] ?? oauthProviders['google-fit'];
+      const accessToken = await getValidToken(src.id, provider);
+      const parsedSamples = await fetchGoogleFitSamples(accessToken);
+      const inserted = await upsertGoogleFitSamples(user.id, src.id, parsedSamples);
 
-    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
 
-    return { inserted, sourceId: src.id };
-  });
+      return { inserted, sourceId: src.id };
+    } catch (err: unknown) {
+      req.log.error(err, 'Google Health sync failed');
+      const msg = err instanceof Error ? err.message : 'Synchronisation fehlgeschlagen.';
+      return reply.status(400).send({
+        title: msg.includes('OAuth') || msg.includes('token') || msg.includes('credential')
+          ? 'Google Health-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Google Health erneut.'
+          : `Google Health-Synchronisation fehlgeschlagen: ${msg}`,
+      });
+    }
+  };
+
+  app.post('/api/sources/google-fit/sync', handleGoogleSync);
+  app.post('/api/sources/google-health/sync', handleGoogleSync);
 
   // ── Oura sync (Issue #33) ────────────────────────────────────────────────────
 
@@ -1178,23 +1214,38 @@ const start = async () => {
       .limit(1);
 
     if (!src) return reply.status(404).send({ title: 'Oura ist nicht verbunden.' });
-
-    const accessToken = await getValidToken(src.id, oauthProviders.oura);
-    const parsedSamples = await fetchOuraSamples(accessToken);
-
-    let inserted = 0;
-    for (const s of parsedSamples) {
-      await db.insert(samples).values({
-        userId: user.id, sourceId: src.id,
-        metric: s.metric, value: s.value, unit: s.unit,
-        measuredAt: new Date(s.measuredAt),
-      }).onConflictDoNothing();
-      inserted++;
+    if (!src.credentials) {
+      return reply.status(400).send({
+        title: 'Oura ist nicht verknüpft oder die Autorisierung wurde getrennt. Bitte verbinde Oura erneut.',
+      });
     }
 
-    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+    try {
+      const accessToken = await getValidToken(src.id, oauthProviders.oura);
+      const parsedSamples = await fetchOuraSamples(accessToken);
 
-    return { inserted, sourceId: src.id };
+      let inserted = 0;
+      for (const s of parsedSamples) {
+        await db.insert(samples).values({
+          userId: user.id, sourceId: src.id,
+          metric: s.metric, value: s.value, unit: s.unit,
+          measuredAt: new Date(s.measuredAt),
+        }).onConflictDoNothing();
+        inserted++;
+      }
+
+      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+
+      return { inserted, sourceId: src.id };
+    } catch (err: unknown) {
+      req.log.error(err, 'Oura sync failed');
+      const msg = err instanceof Error ? err.message : 'Synchronisation fehlgeschlagen.';
+      return reply.status(400).send({
+        title: msg.includes('OAuth') || msg.includes('token') || msg.includes('credential')
+          ? 'Oura-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Oura erneut.'
+          : `Oura-Synchronisation fehlgeschlagen: ${msg}`,
+      });
+    }
   });
 
   // ── Strava sync (Issue #34) ──────────────────────────────────────────────────
@@ -1208,28 +1259,44 @@ const start = async () => {
       .limit(1);
 
     if (!src) return reply.status(404).send({ title: 'Strava ist nicht verbunden.' });
-
-    const since = src.lastSyncAt ? Math.floor(src.lastSyncAt.getTime() / 1000) : Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60;
-    const accessToken = await getValidToken(src.id, oauthProviders.strava);
-    const parsedSamples = await fetchStravaSamples(accessToken, since);
-
-    let inserted = 0;
-    for (const s of parsedSamples) {
-      await db.insert(samples).values({
-        userId: user.id, sourceId: src.id,
-        metric: s.metric, value: s.value, unit: s.unit,
-        measuredAt: new Date(s.measuredAt),
-      }).onConflictDoUpdate({
-        target: [samples.userId, samples.metric, samples.measuredAt],
-        set: { value: s.value },
+    if (!src.credentials) {
+      return reply.status(400).send({
+        title: 'Strava ist nicht verknüpft oder die Autorisierung wurde getrennt. Bitte verbinde Strava erneut.',
       });
-      inserted++;
     }
 
-    await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+    try {
+      const since = src.lastSyncAt ? Math.floor(src.lastSyncAt.getTime() / 1000) : Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60;
+      const accessToken = await getValidToken(src.id, oauthProviders.strava);
+      const parsedSamples = await fetchStravaSamples(accessToken, since);
 
-    return { inserted, sourceId: src.id };
+      let inserted = 0;
+      for (const s of parsedSamples) {
+        await db.insert(samples).values({
+          userId: user.id, sourceId: src.id,
+          metric: s.metric, value: s.value, unit: s.unit,
+          measuredAt: new Date(s.measuredAt),
+        }).onConflictDoUpdate({
+          target: [samples.userId, samples.metric, samples.measuredAt],
+          set: { value: s.value },
+        });
+        inserted++;
+      }
+
+      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+
+      return { inserted, sourceId: src.id };
+    } catch (err: unknown) {
+      req.log.error(err, 'Strava sync failed');
+      const msg = err instanceof Error ? err.message : 'Synchronisation fehlgeschlagen.';
+      return reply.status(400).send({
+        title: msg.includes('OAuth') || msg.includes('token') || msg.includes('credential')
+          ? 'Strava-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Strava erneut.'
+          : `Strava-Synchronisation fehlgeschlagen: ${msg}`,
+      });
+    }
   });
+
 
   // ── Report ────────────────────────────────────────────────────────────────────
 

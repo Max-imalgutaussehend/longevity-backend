@@ -126,4 +126,21 @@ describe.skipIf(!HAS_DB)('Sources deactivation and deletion — integration', ()
       .where(eq(tables.sources.id, mockSourceId));
     expect(mockSource.enabled).toBe(false);
   });
+
+  it('determines connected status based on adapter and credentials', async () => {
+    const rows = await db.select().from(tables.sources).where(eq(tables.sources.userId, testUserId));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const gRow = rows.find((r: any) => r.id === googleSourceId);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mRow = rows.find((r: any) => r.id === mockSourceId);
+
+    // Google Fit has no credentials in this test -> connected is false
+    const googleConnected = gRow.adapter === 'mock' ? true : gRow.credentials !== null;
+    expect(googleConnected).toBe(false);
+
+    // Mock source -> connected is always true
+    const mockConnected = mRow.adapter === 'mock' ? true : mRow.credentials !== null;
+    expect(mockConnected).toBe(true);
+  });
 });
+

@@ -77,6 +77,18 @@ export function parseGoogleFitAggregate(response: GoogleFitAggregateResponse): S
 }
 
 export interface GoogleHealthDataPoint {
+  name?: string;
+  createTime?: string;
+  updateTime?: string;
+  dataSourceId?: string;
+  origin?: string;
+  metadata?: {
+    dataOrigin?: { packageName?: string };
+    device?: { manufacturer?: string; model?: string; type?: string };
+    recordingMethod?: string;
+    clientRecordId?: string;
+    id?: string;
+  };
   steps?: {
     count?: string | number;
     interval?: {
@@ -109,12 +121,33 @@ export interface GoogleHealthDataPoint {
   };
 }
 
+function getOriginPriority(origin: string): number {
+  const o = origin.toLowerCase();
+  if (o.includes('com.google.android.apps.fitness')) return 100;
+  if (o.includes('com.google.android.gms')) return 95;
+  if (o.includes('google')) return 90;
+  if (o.includes('fitbit')) return 80;
+  if (o.includes('fitness') || o.includes('health')) return 70;
+  if (o.length > 0) return 50;
+  return 10;
+}
+
 export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: GoogleHealthDataPoint[]): Sample[] {
   const samples: Sample[] = [];
   if (!Array.isArray(dataPoints)) return samples;
 
   if (dataType === 'steps') {
-    const dailyMap = new Map<string, number>();
+    interface ParsedStepPoint {
+      count: number;
+      startMs: number | null;
+      endMs: number | null;
+      durationMs: number;
+      isCumulative: boolean;
+      origin: string;
+    }
+
+    const pointsByDay = new Map<string, ParsedStepPoint[]>();
+
     for (const dp of dataPoints) {
       if (dp.steps?.count === undefined) continue;
       const count = Number(dp.steps.count);
@@ -130,24 +163,82 @@ export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: Goog
       }
       if (!dayStr) continue;
 
-      dailyMap.set(dayStr, (dailyMap.get(dayStr) ?? 0) + count);
+      const startIso = dp.steps.interval?.startTime;
+      const endIso = dp.steps.interval?.endTime;
+      const startMs = startIso ? new Date(startIso).getTime() : null;
+      const endMs = endIso ? new Date(endIso).getTime() : null;
+      const durationMs = (startMs !== null && endMs !== null && endMs > startMs) ? (endMs - startMs) : 0;
+      // An interval spanning >= 12 hours represents a full-day cumulative summary record
+      const isCumulative = durationMs >= 12 * 3600 * 1000;
+
+      const origin = dp.metadata?.dataOrigin?.packageName
+        ?? dp.dataSourceId
+        ?? dp.origin
+        ?? '';
+
+      const list = pointsByDay.get(dayStr) ?? [];
+      list.push({ count, startMs, endMs, durationMs, isCumulative, origin });
+      pointsByDay.set(dayStr, list);
     }
 
     const todayStr = new Date().toISOString().slice(0, 10);
-    for (const [dayStr, totalCount] of dailyMap.entries()) {
+
+    for (const [dayStr, dayPoints] of pointsByDay.entries()) {
+      // Group points by origin
+      const byOrigin = new Map<string, ParsedStepPoint[]>();
+      for (const pt of dayPoints) {
+        const list = byOrigin.get(pt.origin) ?? [];
+        list.push(pt);
+        byOrigin.set(pt.origin, list);
+      }
+
+      // Compute total for each origin
+      const originTotals = new Map<string, number>();
+      for (const [origin, pts] of byOrigin.entries()) {
+        const cumulativePts = pts.filter(p => p.isCumulative);
+        if (cumulativePts.length > 0) {
+          // If cumulative records exist for this origin, use the max cumulative record
+          originTotals.set(origin, Math.max(...cumulativePts.map(p => p.count)));
+        } else {
+          // Otherwise, sum intraday non-cumulative records
+          const intradaySum = pts.reduce((sum, p) => sum + p.count, 0);
+          originTotals.set(origin, intradaySum);
+        }
+      }
+
+      // Sort origins by priority descending
+      const sortedOrigins = Array.from(originTotals.entries()).sort(
+        (a, b) => getOriginPriority(b[0]) - getOriginPriority(a[0]),
+      );
+
+      // Take the top priority origin's count to avoid summing multiple apps/devices together
+      let finalCount = sortedOrigins[0]?.[1] ?? 0;
+
+      // Fallback: if finalCount is 0, check for any cumulative record
+      if (finalCount <= 0) {
+        const allCumulative = dayPoints.filter(p => p.isCumulative);
+        if (allCumulative.length > 0) {
+          finalCount = Math.max(...allCumulative.map(p => p.count));
+        }
+      }
+
+      if (finalCount <= 0) continue;
+
       const measuredAt = dayStr === todayStr
         ? new Date().toISOString()
         : `${dayStr}T12:00:00.000Z`;
 
       samples.push({
         metric: 'steps',
-        value: totalCount,
+        value: finalCount,
         unit: 'steps',
         measuredAt,
         sourceKind: 'google_fit',
       });
     }
   } else if (dataType === 'exercise') {
+    const dailyExerciseZone2 = new Map<string, number>();
+
     for (const dp of dataPoints) {
       if (!dp.exercise) continue;
       const exType = (dp.exercise.exerciseType ?? '').toUpperCase();
@@ -165,21 +256,29 @@ export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: Goog
           measuredAt,
           sourceKind: 'google_fit',
         });
-      }
-
-      if (dp.exercise.activeDuration) {
+      } else if (dp.exercise.activeDuration) {
         const secs = parseFloat(dp.exercise.activeDuration);
         if (!Number.isNaN(secs) && secs >= 600) {
           const mins = Math.round((secs / 60) * 10) / 10;
-          samples.push({
-            metric: 'zone2_minutes',
-            value: mins,
-            unit: 'min',
-            measuredAt,
-            sourceKind: 'google_fit',
-          });
+          const dayStr = measuredAt.slice(0, 10);
+          dailyExerciseZone2.set(dayStr, (dailyExerciseZone2.get(dayStr) ?? 0) + mins);
         }
       }
+    }
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    for (const [dayStr, totalMins] of dailyExerciseZone2.entries()) {
+      const measuredAt = dayStr === todayStr
+        ? new Date().toISOString()
+        : `${dayStr}T12:00:00.000Z`;
+
+      samples.push({
+        metric: 'zone2_minutes',
+        value: Math.round(totalMins * 10) / 10,
+        unit: 'min',
+        measuredAt,
+        sourceKind: 'google_fit',
+      });
     }
   } else if (dataType === 'daily-resting-heart-rate') {
     for (const dp of dataPoints) {
@@ -205,17 +304,35 @@ export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: Goog
       }
     }
   } else if (dataType === 'active-minutes') {
+    const dailyActiveMins = new Map<string, number>();
+
     for (const dp of dataPoints) {
       if (!dp.activeMinutes) continue;
       const levels = dp.activeMinutes.activeMinutesByActivityLevel ?? [];
       const totalMinutes = levels.reduce((acc, l) => acc + (Number(l.activeMinutes) || 0), 0);
-      const rawMeasuredAt = dp.activeMinutes.interval?.endTime ?? new Date().toISOString();
-      const measuredAt = new Date(rawMeasuredAt).getTime() > Date.now()
+      if (totalMinutes <= 0) continue;
+
+      let dayStr: string | null = null;
+      const iso = dp.activeMinutes.interval?.endTime ?? dp.activeMinutes.interval?.startTime;
+      if (iso) dayStr = iso.slice(0, 10);
+      if (!dayStr) continue;
+
+      dailyActiveMins.set(dayStr, (dailyActiveMins.get(dayStr) ?? 0) + totalMinutes);
+    }
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    for (const [dayStr, totalMinutes] of dailyActiveMins.entries()) {
+      const measuredAt = dayStr === todayStr
         ? new Date().toISOString()
-        : rawMeasuredAt;
-      if (totalMinutes > 0) {
-        samples.push({ metric: 'zone2_minutes', value: totalMinutes, unit: 'min', measuredAt, sourceKind: 'google_fit' });
-      }
+        : `${dayStr}T12:00:00.000Z`;
+
+      samples.push({
+        metric: 'zone2_minutes',
+        value: Math.round(totalMinutes * 10) / 10,
+        unit: 'min',
+        measuredAt,
+        sourceKind: 'google_fit',
+      });
     }
   } else if (dataType === 'daily-vo2-max') {
     for (const dp of dataPoints) {
@@ -264,6 +381,31 @@ function extractOldestTimestamp(dp: GoogleHealthDataPoint, dt: string): string |
     }
   }
   return null;
+}
+
+export function consolidateDailyZone2Samples(samples: Sample[]): Sample[] {
+  const nonZone2: Sample[] = [];
+  const zone2ByDay = new Map<string, Sample>();
+
+  for (const s of samples) {
+    if (s.metric !== 'zone2_minutes') {
+      nonZone2.push(s);
+      continue;
+    }
+
+    const dayStr = s.measuredAt.slice(0, 10);
+    const existing = zone2ByDay.get(dayStr);
+    if (!existing) {
+      zone2ByDay.set(dayStr, s);
+    } else {
+      // Keep the higher value between active minutes and exercise active duration
+      if (s.value > existing.value) {
+        zone2ByDay.set(dayStr, s);
+      }
+    }
+  }
+
+  return [...nonZone2, ...zone2ByDay.values()];
 }
 
 async function fetchGoogleHealthV4Samples(accessToken: string): Promise<Sample[]> {
@@ -327,7 +469,7 @@ async function fetchGoogleHealthV4Samples(accessToken: string): Promise<Sample[]
     }
   }
 
-  return samples;
+  return consolidateDailyZone2Samples(samples);
 }
 
 export async function fetchGoogleFitSamples(accessToken: string): Promise<Sample[]> {
