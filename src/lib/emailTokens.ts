@@ -4,11 +4,11 @@ import { db } from '../db/client.js';
 import { emailTokens } from '../db/schema.js';
 import type { EmailTokenPurpose } from '../db/schema.js';
 
-const TOKEN_TTL_MS = 60 * 60 * 1000;
+const DEFAULT_TOKEN_TTL_MS = 60 * 60 * 1000;
 
-export async function issueEmailToken(userId: string, purpose: EmailTokenPurpose): Promise<string> {
+export async function issueEmailToken(userId: string, purpose: EmailTokenPurpose, ttlMs = DEFAULT_TOKEN_TTL_MS): Promise<string> {
   const id = randomBytes(32).toString('base64url');
-  const expiresAt = new Date(Date.now() + TOKEN_TTL_MS);
+  const expiresAt = new Date(Date.now() + ttlMs);
   await db.insert(emailTokens).values({ id, userId, purpose, expiresAt });
   return id;
 }
