@@ -14,6 +14,8 @@ import { METRICS } from './score/metrics.js';
 import { generate } from './mock/generate.js';
 import { isWeakPassword } from './lib/weakPasswords.js';
 import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
+import { issueEmailToken, consumeEmailToken } from './lib/emailTokens.js';
+import { sendMail } from './lib/mail.js';
 
 const METRIC_LABELS: Record<string, string> = {
   vo2max: 'VO₂max',
@@ -223,7 +225,55 @@ const start = async () => {
     }
 
     req.session.userId = user.id;
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const token = await issueEmailToken(user.id, 'verify_email');
+    const verifyUrl = `${baseUrl}/verify-email/${token}`;
+    try {
+      await sendMail({
+        to: user.email,
+        subject: 'Bitte bestätige deine E-Mail-Adresse',
+        html: `<p>Willkommen bei LONGEVITY!</p><p>Bitte bestätige deine E-Mail-Adresse, um dein Konto vollständig zu nutzen:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>Der Link ist eine Stunde gültig.</p>`,
+      });
+    } catch (err) {
+      req.log.error(err, 'Verifikations-E-Mail konnte nicht gesendet werden');
+    }
+
     return reply.status(201).send({ id: user.id, email: user.email });
+  });
+
+  app.post('/api/auth/verify-email', async (req, reply) => {
+    const { token } = req.body as { token?: string };
+    if (!token) return reply.status(400).send({ title: 'Token fehlt.' });
+
+    const result = await consumeEmailToken(token, 'verify_email');
+    if (!result.ok) {
+      const reasonTitle = result.reason === 'expired'
+        ? 'Der Verifikationslink ist abgelaufen.'
+        : result.reason === 'used'
+        ? 'Der Verifikationslink wurde bereits verwendet.'
+        : 'Ungültiger Verifikationslink.';
+      return reply.status(400).send({ title: reasonTitle });
+    }
+
+    await db.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.id, result.userId));
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/api/auth/resend-verification', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (user.emailVerifiedAt) return reply.status(400).send({ title: 'E-Mail ist bereits bestätigt.' });
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const token = await issueEmailToken(user.id, 'verify_email');
+    const verifyUrl = `${baseUrl}/verify-email/${token}`;
+    await sendMail({
+      to: user.email,
+      subject: 'Bitte bestätige deine E-Mail-Adresse',
+      html: `<p>Bitte bestätige deine E-Mail-Adresse:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>Der Link ist eine Stunde gültig.</p>`,
+    });
+    return reply.status(200).send({ ok: true });
   });
 
   app.post('/api/auth/login', {
@@ -333,6 +383,7 @@ const start = async () => {
       id: user.id, email: user.email, displayName: user.displayName,
       birthDate: user.birthDate, sex: user.sex,
       chronoAge: Math.round(chronoAge * 10) / 10,
+      emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
     };
   });
 

@@ -7,8 +7,20 @@ export const users = pgTable('users', {
   birthDate: date('birth_date').notNull(),
   sex: text('sex').notNull(),
   displayName: text('display_name'),
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const emailTokens = pgTable('email_tokens', {
+  id: text('id').primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  purpose: text('purpose').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({ userIdx: index().on(t.userId) }));
+
+export type EmailTokenPurpose = 'verify_email' | 'reset_password';
 
 export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),
