@@ -1809,6 +1809,69 @@
         }
       }
     },
+    "/account/consent": {
+      "get": {
+        "operationId": "getAccountConsent",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Get GDPR Art. 9 health data consent status and text",
+        "responses": {
+          "200": {
+            "description": "Consent status"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      },
+      "post": {
+        "operationId": "grantAccountConsent",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Grant GDPR Art. 9 consent to process health data",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Consent recorded"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/account/consent/revoke": {
+      "post": {
+        "operationId": "revokeAccountConsent",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Revoke GDPR Art. 9 health data consent (Art. 7(3) GDPR)",
+        "responses": {
+          "200": {
+            "description": "Consent revoked"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
     "/share-tokens": {
       "get": {
         "operationId": "getShareTokens",
