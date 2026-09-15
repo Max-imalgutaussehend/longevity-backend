@@ -1,5 +1,16 @@
 import { pgTable, uuid, text, boolean, timestamp, date, doublePrecision, bigserial, jsonb, integer, index, unique } from 'drizzle-orm/pg-core';
 
+export const ROLES = ['b2c', 'insurer_admin', 'insurer_staff'] as const;
+export type Role = typeof ROLES[number];
+
+export const organizations = pgTable('organizations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  contactEmail: text('contact_email').notNull(),
+  status: text('status').notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull().unique(),
@@ -7,9 +18,11 @@ export const users = pgTable('users', {
   birthDate: date('birth_date').notNull(),
   sex: text('sex').notNull(),
   displayName: text('display_name'),
+  role: text('role').notNull().default('b2c'),
+  organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => ({ orgIdx: index().on(t.organizationId) }));
 
 export const emailTokens = pgTable('email_tokens', {
   id: text('id').primaryKey(),
