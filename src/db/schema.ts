@@ -8,6 +8,7 @@ export const organizations = pgTable('organizations', {
   name: text('name').notNull(),
   contactEmail: text('contact_email').notNull(),
   status: text('status').notNull().default('pending'),
+  joinCode: text('join_code').notNull().unique(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -19,7 +20,7 @@ export const users = pgTable('users', {
   sex: text('sex').notNull(),
   displayName: text('display_name'),
   role: text('role').notNull().default('b2c'),
-  organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ orgIdx: index().on(t.organizationId) }));
 

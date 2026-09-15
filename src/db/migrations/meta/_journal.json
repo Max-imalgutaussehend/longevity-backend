@@ -22,6 +22,13 @@
       "when": 1789465538002,
       "tag": "0002_chunky_scarlet_spider",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789467736286,
+      "tag": "0003_curly_terror",
+      "breakpoints": true
     }
   ]
 }

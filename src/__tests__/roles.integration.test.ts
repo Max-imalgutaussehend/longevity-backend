@@ -30,6 +30,7 @@ describe.skipIf(!HAS_DB)('Role model — integration', () => {
     const [org] = await db.insert(tables.organizations).values({
       name: 'Testkasse',
       contactEmail: 'kontakt@testkasse.de',
+      joinCode: `roles-test-${Date.now()}`,
     }).returning();
     orgId = org.id;
 
@@ -63,10 +64,11 @@ describe.skipIf(!HAS_DB)('Role model — integration', () => {
     expect(user.organizationId).toBe(orgId);
   });
 
-  it('cascades organization deletion to its users', async () => {
+  it('un-links users instead of deleting them when their organization is deleted', async () => {
     const [tempOrg] = await db.insert(tables.organizations).values({
       name: 'Temp Kasse',
       contactEmail: 'temp@testkasse.de',
+      joinCode: `roles-temp-${Date.now()}`,
     }).returning();
 
     const [tempUser] = await db.insert(tables.users).values({
@@ -80,7 +82,10 @@ describe.skipIf(!HAS_DB)('Role model — integration', () => {
 
     await db.delete(tables.organizations).where(eq(tables.organizations.id, tempOrg.id));
 
-    const remaining = await db.select().from(tables.users).where(eq(tables.users.id, tempUser.id));
-    expect(remaining).toHaveLength(0);
+    const [remaining] = await db.select().from(tables.users).where(eq(tables.users.id, tempUser.id));
+    expect(remaining).toBeDefined();
+    expect(remaining.organizationId).toBeNull();
+
+    await db.delete(tables.users).where(eq(tables.users.id, tempUser.id));
   });
 });
