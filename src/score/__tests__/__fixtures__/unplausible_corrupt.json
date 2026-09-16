@@ -1,0 +1,10 @@
+{
+  "profile": { "birthDate": "1997-03-14", "sex": "m" },
+  "now": "2026-09-09T12:00:00.000Z",
+  "samples": [
+    { "metric": "vo2max", "value": -15, "unit": "ml/kg/min", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "resting_hr", "value": -60, "unit": "bpm", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "steps", "value": -5000, "unit": "steps/day", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "sleep_duration", "value": -4, "unit": "h", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "oura" }
+  ]
+}
