@@ -12,6 +12,7 @@ export interface OAuthProvider {
   clientSecret: string | undefined;
   scope: string;
   redirectUri(baseUrl: string): string;
+  extraTokenParams?: Record<string, string>;
 }
 
 export function parseTokenResponse(
@@ -67,16 +68,22 @@ export async function exchangeCodeForToken(
   overrideRedirectUri?: string,
 ): Promise<OAuthCredentials> {
   const redirect_uri = overrideRedirectUri ?? provider.redirectUri(baseUrl);
+  const bodyParams: Record<string, string> = {
+    grant_type: 'authorization_code',
+    code,
+    client_id: provider.clientId ?? '',
+    client_secret: provider.clientSecret ?? '',
+    redirect_uri,
+    ...(provider.extraTokenParams ?? {}),
+  };
+  if (provider.kind === 'withings' && !bodyParams.action) {
+    bodyParams.action = 'requesttoken';
+  }
+
   const res = await fetch(provider.tokenUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      client_id: provider.clientId ?? '',
-      client_secret: provider.clientSecret ?? '',
-      redirect_uri,
-    }),
+    body: new URLSearchParams(bodyParams),
   });
 
   if (!res.ok) {
@@ -88,15 +95,21 @@ export async function exchangeCodeForToken(
 }
 
 async function refreshToken(provider: OAuthProvider, credentials: OAuthCredentials): Promise<OAuthCredentials> {
+  const bodyParams: Record<string, string> = {
+    grant_type: 'refresh_token',
+    refresh_token: credentials.refreshToken,
+    client_id: provider.clientId ?? '',
+    client_secret: provider.clientSecret ?? '',
+    ...(provider.extraTokenParams ?? {}),
+  };
+  if (provider.kind === 'withings' && !bodyParams.action) {
+    bodyParams.action = 'requesttoken';
+  }
+
   const res = await fetch(provider.tokenUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: credentials.refreshToken,
-      client_id: provider.clientId ?? '',
-      client_secret: provider.clientSecret ?? '',
-    }),
+    body: new URLSearchParams(bodyParams),
   });
 
   if (!res.ok) {
