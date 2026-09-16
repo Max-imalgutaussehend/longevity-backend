@@ -84,7 +84,7 @@ paths['/auth/google/callback'] = {
 
 
 paths['/me'] = {
-  get: { operationId: 'getMe', tags: ['User'], summary: 'Get current user', responses: { 200: { description: 'User object' }, ...auth401 } },
+  get: { operationId: 'getMe', tags: ['User'], summary: 'Get current user', responses: { 200: { description: 'User object', content: { 'application/json': { schema: ref('User') } } }, ...auth401 } },
 };
 
 paths['/organizations/join'] = {
@@ -352,43 +352,89 @@ paths['/offers'] = {
 // ── Components ────────────────────────────────────────────────────────────────
 const schemas: Record<string, unknown> = {
   Error: { type: 'object', required: ['title'], properties: { title: { type: 'string' } } },
-  MetricResult: { type: 'object', properties: {
-    metric: { type: 'string' }, domain: { type: 'string' }, value: { type: ['number', 'null'] },
-    unit: { type: 'string' }, percentile: { type: ['number', 'null'] }, ageDays: { type: ['number', 'null'] },
-    freshness: { type: 'number' }, effectiveWeight: { type: 'number' }, contribution: { type: 'number' }, available: { type: 'boolean' },
-  } },
-  DomainResult: { type: 'object', properties: {
-    domain: { type: 'string' }, weight: { type: 'number' }, score: { type: 'number' },
-    metrics: { type: 'array', items: ref('MetricResult') },
-  } },
-  ScoreResult: { type: 'object', properties: {
-    score: { type: 'number' }, coverage: { type: 'number' }, bioAge: { type: 'number' }, chronoAge: { type: 'number' },
-    band: { type: 'object', properties: { low: { type: 'integer' }, high: { type: 'integer' } } },
-    domains: { type: 'array', items: ref('DomainResult') },
-    engineVersion: { type: 'string' }, computedAt: { type: 'string', format: 'date-time' },
-  } },
-  HistoryPoint: { type: 'object', properties: {
-    date: { type: 'string', format: 'date' }, score: { type: 'number' }, coverage: { type: 'number' },
-  } },
-  Source: { type: 'object', properties: {
-    id: { type: 'string', format: 'uuid' }, kind: { type: 'string' }, adapter: { type: 'string' },
-    enabled: { type: 'boolean' }, connected: { type: 'boolean' }, lastSyncAt: { type: ['string', 'null'], format: 'date-time' }, sampleCount: { type: 'integer' },
-  } },
+  MetricResult: {
+    type: 'object',
+    required: ['metric', 'domain', 'value', 'unit', 'percentile', 'ageDays', 'freshness', 'effectiveWeight', 'contribution', 'available'],
+    properties: {
+      metric: { type: 'string' }, domain: { type: 'string' }, value: { type: ['number', 'null'] },
+      unit: { type: 'string' }, percentile: { type: ['number', 'null'] }, ageDays: { type: ['number', 'null'] },
+      freshness: { type: 'number' }, effectiveWeight: { type: 'number' }, contribution: { type: 'number' }, available: { type: 'boolean' },
+    },
+  },
+  DomainResult: {
+    type: 'object',
+    required: ['domain', 'weight', 'score', 'metrics'],
+    properties: {
+      domain: { type: 'string' }, weight: { type: 'number' }, score: { type: 'number' },
+      metrics: { type: 'array', items: ref('MetricResult') },
+    },
+  },
+  ScoreResult: {
+    type: 'object',
+    required: ['score', 'coverage', 'bioAge', 'chronoAge', 'band', 'domains', 'engineVersion', 'computedAt'],
+    properties: {
+      score: { type: 'number' }, coverage: { type: 'number' }, bioAge: { type: 'number' }, chronoAge: { type: 'number' },
+      band: { type: 'object', required: ['low', 'high'], properties: { low: { type: 'integer' }, high: { type: 'integer' } } },
+      domains: { type: 'array', items: ref('DomainResult') },
+      engineVersion: { type: 'string' }, computedAt: { type: 'string', format: 'date-time' },
+    },
+  },
+  HistoryPoint: {
+    type: 'object',
+    required: ['date', 'score', 'coverage'],
+    properties: {
+      date: { type: 'string', format: 'date' }, score: { type: 'number' }, coverage: { type: 'number' },
+    },
+  },
+  Source: {
+    type: 'object',
+    required: ['id', 'kind', 'adapter', 'enabled', 'lastSyncAt', 'sampleCount'],
+    properties: {
+      id: { type: 'string', format: 'uuid' }, kind: { type: 'string' }, adapter: { type: 'string' },
+      enabled: { type: 'boolean' }, connected: { type: 'boolean' },
+      syncStatus: { type: ['string', 'null'], enum: ['ok', 'token_expired', 'error', null] },
+      syncError: { type: ['string', 'null'] },
+      lastSyncAt: { type: ['string', 'null'], format: 'date-time' }, sampleCount: { type: 'integer' },
+    },
+  },
 
-  ShareToken: { type: 'object', properties: {
-    id: { type: 'string' }, bandLow: { type: 'integer' }, bandHigh: { type: 'integer' },
-    issuedAt: { type: 'string', format: 'date-time' }, expiresAt: { type: 'string', format: 'date-time' },
-    revokedAt: { type: ['string', 'null'], format: 'date-time' }, partnerRef: { type: ['string', 'null'] },
-  } },
-  PartnerOffer: { type: 'object', properties: {
-    id: { type: 'string', format: 'uuid' }, partnerName: { type: 'string' }, title: { type: 'string' },
-    description: { type: 'string' }, minBand: { type: 'integer' }, valueLabel: { type: 'string' },
-    isDemo: { type: 'boolean' }, qualified: { type: 'boolean' },
-  } },
-  WeeklyReport: { type: 'object', properties: {
-    weekStart: { type: 'string', format: 'date' }, scoreStart: { type: 'number' }, scoreEnd: { type: 'number' },
-    delta: { type: 'number' }, bestMetric: { type: 'string' }, worstMetric: { type: 'string' }, streakDays: { type: 'integer' },
-  } },
+  ShareToken: {
+    type: 'object',
+    required: ['id', 'bandLow', 'bandHigh', 'issuedAt', 'expiresAt', 'revokedAt', 'partnerRef'],
+    properties: {
+      id: { type: 'string' }, bandLow: { type: 'integer' }, bandHigh: { type: 'integer' },
+      issuedAt: { type: 'string', format: 'date-time' }, expiresAt: { type: 'string', format: 'date-time' },
+      revokedAt: { type: ['string', 'null'], format: 'date-time' }, partnerRef: { type: ['string', 'null'] },
+    },
+  },
+  PartnerOffer: {
+    type: 'object',
+    required: ['id', 'partnerName', 'title', 'description', 'minBand', 'valueLabel', 'isDemo', 'qualified'],
+    properties: {
+      id: { type: 'string', format: 'uuid' }, partnerName: { type: 'string' }, title: { type: 'string' },
+      description: { type: 'string' }, minBand: { type: 'integer' }, valueLabel: { type: 'string' },
+      isDemo: { type: 'boolean' }, qualified: { type: 'boolean' },
+    },
+  },
+  User: {
+    type: 'object',
+    required: ['id', 'email', 'displayName', 'birthDate', 'sex', 'chronoAge'],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      email: { type: 'string', format: 'email' },
+      displayName: { type: ['string', 'null'] },
+      birthDate: { type: 'string', format: 'date' },
+      sex: { type: 'string', enum: ['m', 'f'] },
+      chronoAge: { type: 'number' },
+    },
+  },
+  WeeklyReport: {
+    type: 'object',
+    properties: {
+      weekStart: { type: 'string', format: 'date' }, scoreStart: { type: 'number' }, scoreEnd: { type: 'number' },
+      delta: { type: 'number' }, bestMetric: { type: 'string' }, worstMetric: { type: 'string' }, streakDays: { type: 'integer' },
+    },
+  },
 };
 
 // ── Assemble spec ─────────────────────────────────────────────────────────────

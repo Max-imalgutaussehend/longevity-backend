@@ -37,6 +37,18 @@
       },
       "MetricResult": {
         "type": "object",
+        "required": [
+          "metric",
+          "domain",
+          "value",
+          "unit",
+          "percentile",
+          "ageDays",
+          "freshness",
+          "effectiveWeight",
+          "contribution",
+          "available"
+        ],
         "properties": {
           "metric": {
             "type": "string"
@@ -81,6 +93,12 @@
       },
       "DomainResult": {
         "type": "object",
+        "required": [
+          "domain",
+          "weight",
+          "score",
+          "metrics"
+        ],
         "properties": {
           "domain": {
             "type": "string"
@@ -101,6 +119,16 @@
       },
       "ScoreResult": {
         "type": "object",
+        "required": [
+          "score",
+          "coverage",
+          "bioAge",
+          "chronoAge",
+          "band",
+          "domains",
+          "engineVersion",
+          "computedAt"
+        ],
         "properties": {
           "score": {
             "type": "number"
@@ -116,6 +144,10 @@
           },
           "band": {
             "type": "object",
+            "required": [
+              "low",
+              "high"
+            ],
             "properties": {
               "low": {
                 "type": "integer"
@@ -142,6 +174,11 @@
       },
       "HistoryPoint": {
         "type": "object",
+        "required": [
+          "date",
+          "score",
+          "coverage"
+        ],
         "properties": {
           "date": {
             "type": "string",
@@ -157,6 +194,14 @@
       },
       "Source": {
         "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "adapter",
+          "enabled",
+          "lastSyncAt",
+          "sampleCount"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -174,6 +219,24 @@
           "connected": {
             "type": "boolean"
           },
+          "syncStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "ok",
+              "token_expired",
+              "error",
+              null
+            ]
+          },
+          "syncError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "lastSyncAt": {
             "type": [
               "string",
@@ -188,6 +251,15 @@
       },
       "ShareToken": {
         "type": "object",
+        "required": [
+          "id",
+          "bandLow",
+          "bandHigh",
+          "issuedAt",
+          "expiresAt",
+          "revokedAt",
+          "partnerRef"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -223,6 +295,16 @@
       },
       "PartnerOffer": {
         "type": "object",
+        "required": [
+          "id",
+          "partnerName",
+          "title",
+          "description",
+          "minBand",
+          "valueLabel",
+          "isDemo",
+          "qualified"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -248,6 +330,47 @@
           },
           "qualified": {
             "type": "boolean"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "displayName",
+          "birthDate",
+          "sex",
+          "chronoAge"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "birthDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "sex": {
+            "type": "string",
+            "enum": [
+              "m",
+              "f"
+            ]
+          },
+          "chronoAge": {
+            "type": "number"
           }
         }
       },
@@ -657,7 +780,14 @@
         "summary": "Get current user",
         "responses": {
           "200": {
-            "description": "User object"
+            "description": "User object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthenticated"

@@ -52,7 +52,7 @@ import { parseAppleHealthXml } from './adapters/appleHealth.js';
 import { looksLikeZip, extractExportXml, AppleHealthZipError } from './adapters/appleHealthZip.js';
 import { parseHealthAutoExport } from './adapters/healthAutoExport.js';
 import { parseFhirBundle } from './adapters/fhir.js';
-import { exchangeCodeForToken, getValidToken } from './lib/oauthTokens.js';
+import { exchangeCodeForToken, getValidToken, isTokenError } from './lib/oauthTokens.js';
 import { oauthProviders, providerToSourceKind } from './lib/oauthProviders.js';
 import { fetchWithingsSamples } from './adapters/withings.js';
 import { fetchGoogleFitSamples } from './adapters/googleFit.js';
@@ -682,7 +682,9 @@ const start = async () => {
 
     return rows.map(s => ({
       id: s.id, kind: s.kind, adapter: s.adapter, enabled: s.enabled,
-      connected: s.adapter === 'mock' ? true : s.credentials !== null,
+      connected: s.adapter === 'mock' ? true : (s.credentials !== null && s.syncStatus !== 'token_expired'),
+      syncStatus: s.syncStatus ?? (s.adapter === 'mock' ? 'ok' : (s.credentials ? 'ok' : null)),
+      syncError: s.syncError ?? null,
       lastSyncAt: s.lastSyncAt?.toISOString() ?? null,
       sampleCount: countMap.get(s.id) ?? 0,
     }));
@@ -940,9 +942,13 @@ const start = async () => {
       [src] = await db.insert(sources).values({
         userId, kind: sourceKind, adapter: provider,
         enabled: true, consentAt: new Date(), credentials,
+        syncStatus: 'ok', syncError: null,
       }).returning();
     } else {
-      await db.update(sources).set({ credentials, enabled: true, consentAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({
+        credentials, enabled: true, consentAt: new Date(),
+        syncStatus: 'ok', syncError: null,
+      }).where(eq(sources.id, src.id));
     }
 
     // Auto-sync initial samples for Google Fit / Google Health
@@ -950,7 +956,7 @@ const start = async () => {
       try {
         const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
         await upsertGoogleFitSamples(userId, src.id, parsedSamples);
-        await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+        await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
       } catch (err) {
         req.log.warn(err, 'Initial Google sync after OAuth callback failed');
       }
@@ -1003,15 +1009,19 @@ const start = async () => {
       [src] = await db.insert(sources).values({
         userId, kind: 'google_fit', adapter: 'google-fit',
         enabled: true, consentAt: new Date(), credentials,
+        syncStatus: 'ok', syncError: null,
       }).returning();
     } else {
-      await db.update(sources).set({ credentials, enabled: true, consentAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({
+        credentials, enabled: true, consentAt: new Date(),
+        syncStatus: 'ok', syncError: null,
+      }).where(eq(sources.id, src.id));
     }
 
     try {
       const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
       await upsertGoogleFitSamples(userId, src.id, parsedSamples);
-      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
     } catch (err) {
       req.log.warn(err, 'Initial Google sync after OAuth callback failed');
     }
@@ -1077,9 +1087,13 @@ const start = async () => {
       [src] = await db.insert(sources).values({
         userId: user.id, kind: sourceKind, adapter: provider,
         enabled: true, consentAt: new Date(), credentials,
+        syncStatus: 'ok', syncError: null,
       }).returning();
     } else {
-      await db.update(sources).set({ credentials, enabled: true, consentAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({
+        credentials, enabled: true, consentAt: new Date(),
+        syncStatus: 'ok', syncError: null,
+      }).where(eq(sources.id, src.id));
     }
 
     let inserted = 0;
@@ -1087,7 +1101,7 @@ const start = async () => {
       try {
         const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
         inserted = await upsertGoogleFitSamples(user.id, src.id, parsedSamples);
-        await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+        await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
       } catch (err) {
         req.log.warn(err, 'Initial Google sync after manual exchange failed');
       }
@@ -1114,7 +1128,7 @@ const start = async () => {
       await db.delete(samples).where(and(eq(samples.sourceId, id), eq(samples.userId, user.id)));
     }
 
-    await db.update(sources).set({ credentials: null, enabled: false }).where(eq(sources.id, id));
+    await db.update(sources).set({ credentials: null, enabled: false, syncStatus: null, syncError: null }).where(eq(sources.id, id));
 
     const today = new Date().toISOString().slice(0, 10);
     await db.delete(scoreSnapshots)
@@ -1156,8 +1170,13 @@ const start = async () => {
 
     if (!src) return reply.status(404).send({ title: 'Withings ist nicht verbunden.' });
     if (!src.credentials) {
+      await db.update(sources).set({
+        syncStatus: 'token_expired',
+        syncError: 'Withings ist nicht verknüpft oder die Autorisierung wurde getrennt.',
+      }).where(eq(sources.id, src.id));
       return reply.status(400).send({
         title: 'Withings ist nicht verknüpft oder die Autorisierung wurde getrennt. Bitte verbinde Withings erneut.',
+        syncStatus: 'token_expired',
       });
     }
 
@@ -1175,16 +1194,26 @@ const start = async () => {
         inserted++;
       }
 
-      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
 
       return { inserted, sourceId: src.id };
     } catch (err: unknown) {
       req.log.error(err, 'Withings sync failed');
       const msg = err instanceof Error ? err.message : 'Synchronisation fehlgeschlagen.';
+      const isTokenExpired = isTokenError(err, msg);
+      const syncStatus = isTokenExpired ? 'token_expired' : 'error';
+      const errorTitle = isTokenExpired
+        ? 'Withings-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Withings erneut.'
+        : `Withings-Synchronisation fehlgeschlagen: ${msg}`;
+
+      await db.update(sources).set({
+        syncStatus,
+        syncError: errorTitle,
+      }).where(eq(sources.id, src.id));
+
       return reply.status(400).send({
-        title: msg.includes('OAuth') || msg.includes('token') || msg.includes('credential')
-          ? 'Withings-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Withings erneut.'
-          : `Withings-Synchronisation fehlgeschlagen: ${msg}`,
+        title: errorTitle,
+        syncStatus,
       });
     }
   });
@@ -1201,8 +1230,13 @@ const start = async () => {
 
     if (!src) return reply.status(404).send({ title: 'Google Health ist nicht verbunden.' });
     if (!src.credentials) {
+      await db.update(sources).set({
+        syncStatus: 'token_expired',
+        syncError: 'Google Health ist nicht verknüpft oder die Autorisierung wurde getrennt.',
+      }).where(eq(sources.id, src.id));
       return reply.status(400).send({
         title: 'Google Health ist nicht verknüpft oder die Autorisierung wurde getrennt. Bitte verbinde dein Google-Konto erneut.',
+        syncStatus: 'token_expired',
       });
     }
 
@@ -1213,16 +1247,26 @@ const start = async () => {
       const parsedSamples = await fetchGoogleFitSamples(accessToken);
       const inserted = await upsertGoogleFitSamples(user.id, src.id, parsedSamples);
 
-      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
 
       return { inserted, sourceId: src.id };
     } catch (err: unknown) {
       req.log.error(err, 'Google Health sync failed');
       const msg = err instanceof Error ? err.message : 'Synchronisation fehlgeschlagen.';
+      const isTokenExpired = isTokenError(err, msg);
+      const syncStatus = isTokenExpired ? 'token_expired' : 'error';
+      const errorTitle = isTokenExpired
+        ? 'Google Health-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Google Health erneut.'
+        : `Google Health-Synchronisation fehlgeschlagen: ${msg}`;
+
+      await db.update(sources).set({
+        syncStatus,
+        syncError: errorTitle,
+      }).where(eq(sources.id, src.id));
+
       return reply.status(400).send({
-        title: msg.includes('OAuth') || msg.includes('token') || msg.includes('credential')
-          ? 'Google Health-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Google Health erneut.'
-          : `Google Health-Synchronisation fehlgeschlagen: ${msg}`,
+        title: errorTitle,
+        syncStatus,
       });
     }
   };
@@ -1242,8 +1286,13 @@ const start = async () => {
 
     if (!src) return reply.status(404).send({ title: 'Oura ist nicht verbunden.' });
     if (!src.credentials) {
+      await db.update(sources).set({
+        syncStatus: 'token_expired',
+        syncError: 'Oura ist nicht verknüpft oder die Autorisierung wurde getrennt.',
+      }).where(eq(sources.id, src.id));
       return reply.status(400).send({
         title: 'Oura ist nicht verknüpft oder die Autorisierung wurde getrennt. Bitte verbinde Oura erneut.',
+        syncStatus: 'token_expired',
       });
     }
 
@@ -1261,16 +1310,26 @@ const start = async () => {
         inserted++;
       }
 
-      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
 
       return { inserted, sourceId: src.id };
     } catch (err: unknown) {
       req.log.error(err, 'Oura sync failed');
       const msg = err instanceof Error ? err.message : 'Synchronisation fehlgeschlagen.';
+      const isTokenExpired = isTokenError(err, msg);
+      const syncStatus = isTokenExpired ? 'token_expired' : 'error';
+      const errorTitle = isTokenExpired
+        ? 'Oura-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Oura erneut.'
+        : `Oura-Synchronisation fehlgeschlagen: ${msg}`;
+
+      await db.update(sources).set({
+        syncStatus,
+        syncError: errorTitle,
+      }).where(eq(sources.id, src.id));
+
       return reply.status(400).send({
-        title: msg.includes('OAuth') || msg.includes('token') || msg.includes('credential')
-          ? 'Oura-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Oura erneut.'
-          : `Oura-Synchronisation fehlgeschlagen: ${msg}`,
+        title: errorTitle,
+        syncStatus,
       });
     }
   });
@@ -1287,8 +1346,13 @@ const start = async () => {
 
     if (!src) return reply.status(404).send({ title: 'Strava ist nicht verbunden.' });
     if (!src.credentials) {
+      await db.update(sources).set({
+        syncStatus: 'token_expired',
+        syncError: 'Strava ist nicht verknüpft oder die Autorisierung wurde getrennt.',
+      }).where(eq(sources.id, src.id));
       return reply.status(400).send({
         title: 'Strava ist nicht verknüpft oder die Autorisierung wurde getrennt. Bitte verbinde Strava erneut.',
+        syncStatus: 'token_expired',
       });
     }
 
@@ -1310,16 +1374,26 @@ const start = async () => {
         inserted++;
       }
 
-      await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
 
       return { inserted, sourceId: src.id };
     } catch (err: unknown) {
       req.log.error(err, 'Strava sync failed');
       const msg = err instanceof Error ? err.message : 'Synchronisation fehlgeschlagen.';
+      const isTokenExpired = isTokenError(err, msg);
+      const syncStatus = isTokenExpired ? 'token_expired' : 'error';
+      const errorTitle = isTokenExpired
+        ? 'Strava-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Strava erneut.'
+        : `Strava-Synchronisation fehlgeschlagen: ${msg}`;
+
+      await db.update(sources).set({
+        syncStatus,
+        syncError: errorTitle,
+      }).where(eq(sources.id, src.id));
+
       return reply.status(400).send({
-        title: msg.includes('OAuth') || msg.includes('token') || msg.includes('credential')
-          ? 'Strava-Autorisierung ist abgelaufen oder ungültig. Bitte verbinde Strava erneut.'
-          : `Strava-Synchronisation fehlgeschlagen: ${msg}`,
+        title: errorTitle,
+        syncStatus,
       });
     }
   });
