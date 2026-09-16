@@ -26,6 +26,19 @@ describe('parseOuraSleep', () => {
     expect(consistency[0].unit).toBe('min');
   });
 
+  it('handles midnight crossover gracefully without standard deviation explosion', () => {
+    const samples = parseOuraSleep({
+      data: [
+        { day: '2024-06-01', total_sleep_duration: 27000, bedtime_start: '2024-06-01T23:45:00.000Z' },
+        { day: '2024-06-02', total_sleep_duration: 27000, bedtime_start: '2024-06-02T00:15:00.000Z' },
+      ],
+    });
+    const consistency = samples.filter((s) => s.metric === 'sleep_consistency');
+    expect(consistency).toHaveLength(1);
+    // 23:45 and 00:15 are 30 min apart, stddev between them is 15 min, NOT ~700 min
+    expect(consistency[0].value).toBeCloseTo(15, 1);
+  });
+
   it('returns no sleep_consistency sample for fewer than 2 days', () => {
     const samples = parseOuraSleep({ data: [fixture.data[0]] });
     expect(samples.filter((s) => s.metric === 'sleep_consistency')).toHaveLength(0);
