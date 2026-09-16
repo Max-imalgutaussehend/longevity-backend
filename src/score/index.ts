@@ -42,11 +42,18 @@ export function computeScore(input: ScoreInput): ScoreResult {
   const now = input.now instanceof Date ? input.now : new Date(input.now);
   const age = ageYears(profile.birthDate, now);
 
-  // Get most recent sample per metric with freshness
+  // Filter and get most recent valid sample per metric with freshness
   const latestSamples = new Map<string, { value: number; measuredAt: string; sourceKind: string }>();
   for (const s of samples) {
+    if (typeof s.value !== 'number' || !Number.isFinite(s.value) || isNaN(s.value) || s.value < 0) {
+      continue;
+    }
+    const sampleDate = new Date(s.measuredAt);
+    if (isNaN(sampleDate.getTime())) {
+      continue;
+    }
     const existing = latestSamples.get(s.metric);
-    if (!existing || new Date(s.measuredAt) > new Date(existing.measuredAt)) {
+    if (!existing || sampleDate > new Date(existing.measuredAt)) {
       latestSamples.set(s.metric, { value: s.value, measuredAt: s.measuredAt, sourceKind: s.sourceKind });
     }
   }
@@ -108,7 +115,7 @@ export function computeScore(input: ScoreInput): ScoreResult {
     ? available.reduce((s, m) => s + m.effectiveWeight, 0) / totalBaseWeight
     : 0;
 
-  const finalScore = Math.round((50 + coverage * (raw - 50)) * 10) / 10;
+  const finalScore = clamp(Math.round((50 + coverage * (raw - 50)) * 10) / 10, 0, 100);
 
   // Fill contributions
   for (const m of metricResults) {
@@ -132,7 +139,8 @@ export function computeScore(input: ScoreInput): ScoreResult {
 
   const chronoAge = age;
   const bioAge = clamp(chronoAge - (finalScore - 50) / 10, chronoAge - 15, chronoAge + 15);
-  const band = { low: Math.floor(finalScore / 10) * 10, high: Math.floor(finalScore / 10) * 10 + 9 };
+  const bandLow = Math.min(90, Math.floor(finalScore / 10) * 10);
+  const band = { low: bandLow, high: bandLow === 90 ? 100 : bandLow + 9 };
 
   return {
     score: finalScore, coverage: Math.round(coverage * 100) / 100,
