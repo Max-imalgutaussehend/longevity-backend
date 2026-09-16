@@ -65,4 +65,13 @@ describe('parseWithingsSleep', () => {
     expect(samples[0].value).toBeCloseTo(7.5, 5);
     expect(samples[0].sourceKind).toBe('withings');
   });
+
+  it('safely handles invalid date values without throwing', () => {
+    const samples = parseWithingsSleep({
+      status: 0,
+      body: { series: [{ startdate: NaN as unknown as number, enddate: NaN as unknown as number }] },
+    });
+    expect(samples).toHaveLength(1);
+    expect(isNaN(new Date(samples[0].measuredAt).getTime())).toBe(false);
+  });
 });

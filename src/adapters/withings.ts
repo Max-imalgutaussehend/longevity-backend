@@ -35,11 +35,17 @@ function scaledValue(measure: WithingsMeasure): number {
   return measure.value * 10 ** measure.unit;
 }
 
+function safeIsoDate(val: string | number | undefined | null): string {
+  if (val == null) return new Date().toISOString();
+  const d = typeof val === 'number' ? new Date(val * 1000) : new Date(val);
+  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
+
 export function parseWithingsMeasures(response: WithingsMeasureResponse): Sample[] {
   const samples: Sample[] = [];
 
   for (const group of response.body.measuregrps ?? []) {
-    const measuredAt = new Date(group.date * 1000).toISOString();
+    const measuredAt = safeIsoDate(group.date);
 
     for (const measure of group.measures) {
       if (measure.type === MEASURE_TYPE_SYSTOLIC) {
@@ -70,7 +76,7 @@ export function parseWithingsActivity(response: WithingsActivityResponse): Sampl
     metric: 'steps' as const,
     value: a.steps,
     unit: 'steps',
-    measuredAt: new Date(a.date).toISOString(),
+    measuredAt: safeIsoDate(a.date),
     sourceKind: 'withings' as const,
   }));
 }
@@ -80,7 +86,7 @@ export function parseWithingsSleep(response: WithingsSleepResponse): Sample[] {
     metric: 'sleep_duration' as const,
     value: (s.enddate - s.startdate) / 3600,
     unit: 'h',
-    measuredAt: new Date(s.enddate * 1000).toISOString(),
+    measuredAt: safeIsoDate(s.enddate),
     sourceKind: 'withings' as const,
   }));
 }
