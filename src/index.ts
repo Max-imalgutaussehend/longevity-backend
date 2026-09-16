@@ -4,9 +4,10 @@ import session from '@fastify/session';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
 import { z } from 'zod';
+import { randomBytes } from 'node:crypto';
 import { env } from './env.js';
 import { db } from './db/client.js';
-import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots, organizations, healthDataConsents } from './db/schema.js';
+import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots, organizations, healthDataConsents, insurerRequests, emailTokens } from './db/schema.js';
 import type { Role } from './db/schema.js';
 import { eq, desc, and, gte, asc, sql, inArray } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
@@ -17,7 +18,7 @@ import { isWeakPassword } from './lib/weakPasswords.js';
 import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib/signing.js';
 import { issueEmailToken, consumeEmailToken } from './lib/emailTokens.js';
 import { sendMail } from './lib/mail.js';
-import { verifyEmailTemplate, passwordResetTemplate } from './lib/emailTemplates.js';
+import { verifyEmailTemplate, passwordResetTemplate, insurerInviteTemplate, insurerRequestReceivedTemplate } from './lib/emailTemplates.js';
 
 import { CURRENT_HEALTH_DATA_CONSENT_VERSION, HEALTH_DATA_CONSENT_TEXT } from './lib/consent.js';
 export { CURRENT_HEALTH_DATA_CONSENT_VERSION, HEALTH_DATA_CONSENT_TEXT };
@@ -2013,6 +2014,120 @@ const start = async () => {
     await db.delete(partnerOffers)
       .where(and(eq(partnerOffers.id, id), eq(partnerOffers.organizationId, user.organizationId)));
     return reply.status(204).send();
+  });
+
+  // ── Insurer contact request (public) ───────────────────────────────────────────
+
+  app.post('/api/contact/insurer', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
+    const body = req.body as { company?: string; name?: string; email?: string; message?: string };
+    const { company, name, email, message } = body;
+
+    if (!company || !name || !email) {
+      return reply.status(400).send({ title: 'Pflichtfelder fehlen.' });
+    }
+
+    const [request] = await db.insert(insurerRequests).values({
+      company, contactName: name, contactEmail: email, message: message ?? null,
+    }).returning();
+
+    try {
+      await sendMail({ to: email, ...insurerRequestReceivedTemplate(company) });
+    } catch (err) {
+      req.log.error(err, 'Bestätigungs-E-Mail für Krankenkassen-Anfrage konnte nicht gesendet werden');
+    }
+
+    return reply.status(201).send({ id: request.id });
+  });
+
+  // ── Platform admin: insurer requests ───────────────────────────────────────────
+
+  app.get('/api/admin/insurer-requests', async (req, reply) => {
+    const user = await requireRole(req, reply, ['platform_admin']);
+    if (!user) return;
+
+    const rows = await db.select().from(insurerRequests).orderBy(desc(insurerRequests.createdAt));
+    return rows.map(r => ({
+      id: r.id, company: r.company, contactName: r.contactName, contactEmail: r.contactEmail,
+      message: r.message, status: r.status, createdAt: r.createdAt.toISOString(),
+    }));
+  });
+
+  app.post('/api/admin/insurer-requests/:id/approve', async (req, reply) => {
+    const admin = await requireRole(req, reply, ['platform_admin']);
+    if (!admin) return;
+
+    const { id } = req.params as { id: string };
+    const [request] = await db.select().from(insurerRequests).where(eq(insurerRequests.id, id)).limit(1);
+    if (!request) return reply.status(404).send({ title: 'Anfrage nicht gefunden.' });
+    if (request.status !== 'pending') return reply.status(400).send({ title: 'Anfrage wurde bereits bearbeitet.' });
+
+    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, request.contactEmail)).limit(1);
+    if (existing.length > 0) {
+      return reply.status(409).send({ title: 'E-Mail bereits als Nutzer registriert.' });
+    }
+
+    const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+    const { org, token } = await db.transaction(async (tx) => {
+      const [org] = await tx.insert(organizations).values({
+        name: request.company,
+        contactEmail: request.contactEmail,
+        status: 'pending',
+        joinCode: randomBytes(6).toString('hex'),
+      }).returning();
+
+      const unusablePasswordHash = await hash(randomBytes(32).toString('base64url'));
+      const [insurerUser] = await tx.insert(users).values({
+        email: request.contactEmail,
+        passwordHash: unusablePasswordHash,
+        birthDate: '1970-01-01',
+        sex: 'm',
+        role: 'insurer_admin',
+        organizationId: org.id,
+      }).returning();
+
+      const token = randomBytes(32).toString('base64url');
+      await tx.insert(emailTokens).values({
+        id: token, userId: insurerUser.id, purpose: 'insurer_invite',
+        expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+      });
+
+      await tx.update(insurerRequests).set({
+        status: 'approved', organizationId: org.id, decidedAt: new Date(), decidedBy: admin.id,
+      }).where(eq(insurerRequests.id, id));
+
+      return { org, token };
+    });
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? 'http://localhost:5173';
+    const inviteUrl = `${baseUrl}/insurer-invite/${token}`;
+    await sendMail({ to: request.contactEmail, ...insurerInviteTemplate(request.company, inviteUrl) });
+
+    return reply.status(200).send({ ok: true, organizationId: org.id });
+  });
+
+  app.post('/api/admin/insurer-requests/:id/reject', async (req, reply) => {
+    const admin = await requireRole(req, reply, ['platform_admin']);
+    if (!admin) return;
+
+    const { id } = req.params as { id: string };
+    const [request] = await db.select().from(insurerRequests).where(eq(insurerRequests.id, id)).limit(1);
+    if (!request) return reply.status(404).send({ title: 'Anfrage nicht gefunden.' });
+    if (request.status !== 'pending') return reply.status(400).send({ title: 'Anfrage wurde bereits bearbeitet.' });
+
+    await db.update(insurerRequests).set({
+      status: 'rejected', decidedAt: new Date(), decidedBy: admin.id,
+    }).where(eq(insurerRequests.id, id));
+
+    return reply.status(200).send({ ok: true });
   });
 
   try {

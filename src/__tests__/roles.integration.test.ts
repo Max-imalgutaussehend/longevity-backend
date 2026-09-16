@@ -88,4 +88,19 @@ describe.skipIf(!HAS_DB)('Role model — integration', () => {
 
     await db.delete(tables.users).where(eq(tables.users.id, tempUser.id));
   });
+
+  it('allows a platform_admin user with no organization', async () => {
+    const [admin] = await db.insert(tables.users).values({
+      email: `roles-admin-${Date.now()}@test.local`,
+      passwordHash: 'secret-hash',
+      birthDate: '1980-01-01',
+      sex: 'f',
+      role: 'platform_admin',
+    }).returning();
+
+    expect(admin.role).toBe('platform_admin');
+    expect(admin.organizationId).toBeNull();
+
+    await db.delete(tables.users).where(eq(tables.users.id, admin.id));
+  });
 });

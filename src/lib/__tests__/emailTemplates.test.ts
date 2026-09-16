@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { verifyEmailTemplate, passwordResetTemplate, insurerInviteTemplate } from '../emailTemplates.js';
+import { verifyEmailTemplate, passwordResetTemplate, insurerInviteTemplate, insurerRequestReceivedTemplate } from '../emailTemplates.js';
 
 describe('email templates', () => {
   it('embeds the verify URL in both the button and the fallback link', () => {
@@ -30,5 +30,17 @@ describe('email templates', () => {
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).toContain('&amp;');
     expect(html).toContain('&quot;Kasse&quot;');
+  });
+
+  it('includes the company name in the insurer request received template', () => {
+    const { subject, html } = insurerRequestReceivedTemplate('Testkasse GmbH');
+    expect(subject).toContain('eingegangen');
+    expect(html).toContain('Testkasse GmbH');
+  });
+
+  it('escapes HTML-significant characters in the request received company name', () => {
+    const { html } = insurerRequestReceivedTemplate('<script>alert(1)</script>');
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
   });
 });

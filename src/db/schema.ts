@@ -1,6 +1,6 @@
 import { pgTable, uuid, text, boolean, timestamp, date, doublePrecision, bigserial, jsonb, integer, index, unique } from 'drizzle-orm/pg-core';
 
-export const ROLES = ['b2c', 'insurer_admin', 'insurer_staff'] as const;
+export const ROLES = ['b2c', 'insurer_admin', 'insurer_staff', 'platform_admin'] as const;
 export type Role = typeof ROLES[number];
 
 export const organizations = pgTable('organizations', {
@@ -129,4 +129,19 @@ export const healthDataConsents = pgTable('health_data_consents', {
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
 }, (t) => ({ userIdx: index().on(t.userId) }));
+
+export type InsurerRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export const insurerRequests = pgTable('insurer_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  company: text('company').notNull(),
+  contactName: text('contact_name').notNull(),
+  contactEmail: text('contact_email').notNull(),
+  message: text('message'),
+  status: text('status').$type<InsurerRequestStatus>().notNull().default('pending'),
+  organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'set null' }),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  decidedBy: uuid('decided_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({ statusIdx: index().on(t.status) }));
 
