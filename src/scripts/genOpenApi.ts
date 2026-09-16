@@ -306,6 +306,19 @@ paths['/account/export'] = {
     responses: { 200: { description: 'Full account data export (application/json, Content-Disposition: attachment)' }, ...auth401 } },
 };
 
+paths['/account/consent'] = {
+  get: { operationId: 'getAccountConsent', tags: ['Account'], summary: 'Get GDPR Art. 9 health data consent status and text',
+    responses: { 200: { description: 'Consent status' }, ...auth401 } },
+  post: { operationId: 'grantAccountConsent', tags: ['Account'], summary: 'Grant GDPR Art. 9 consent to process health data',
+    requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { version: { type: 'string' } } } } } },
+    responses: { 200: { description: 'Consent recorded' }, ...auth401 } },
+};
+
+paths['/account/consent/revoke'] = {
+  post: { operationId: 'revokeAccountConsent', tags: ['Account'], summary: 'Revoke GDPR Art. 9 health data consent (Art. 7(3) GDPR)',
+    responses: { 200: { description: 'Consent revoked' }, ...auth401 } },
+};
+
 paths['/share-tokens'] = {
   get: { operationId: 'getShareTokens', tags: ['Share'], summary: 'List share tokens',
     responses: { 200: { description: 'ShareToken[]', content: { 'application/json': { schema: { type: 'array', items: ref('ShareToken') } } } }, ...auth401 } },

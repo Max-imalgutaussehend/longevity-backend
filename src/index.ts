@@ -6,7 +6,7 @@ import multipart from '@fastify/multipart';
 import { z } from 'zod';
 import { env } from './env.js';
 import { db } from './db/client.js';
-import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots, organizations } from './db/schema.js';
+import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots, organizations, healthDataConsents } from './db/schema.js';
 import type { Role } from './db/schema.js';
 import { eq, desc, and, gte, asc, sql, inArray } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
@@ -18,6 +18,9 @@ import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from './lib
 import { issueEmailToken, consumeEmailToken } from './lib/emailTokens.js';
 import { sendMail } from './lib/mail.js';
 import { verifyEmailTemplate, passwordResetTemplate } from './lib/emailTemplates.js';
+
+import { CURRENT_HEALTH_DATA_CONSENT_VERSION, HEALTH_DATA_CONSENT_TEXT } from './lib/consent.js';
+export { CURRENT_HEALTH_DATA_CONSENT_VERSION, HEALTH_DATA_CONSENT_TEXT };
 
 const METRIC_LABELS: Record<string, string> = {
   vo2max: 'VO₂max',
@@ -222,19 +225,6 @@ const start = async () => {
     const [user] = await db.insert(users).values({
       email, passwordHash, birthDate, sex, displayName: displayName ?? null,
     }).returning();
-
-    const [src] = await db.insert(sources).values({
-      userId: user.id, kind: 'apple_health', adapter: 'mock', enabled: true, lastSyncAt: new Date(),
-    }).returning();
-
-    const mockSamples = generate(user.id.charCodeAt(0) * 31 + 7, 90);
-    if (mockSamples.length > 0) {
-      await db.insert(samples).values(mockSamples.map(s => ({
-        userId: user.id, sourceId: src.id,
-        metric: s.metric, value: s.value, unit: s.unit,
-        measuredAt: new Date(s.measuredAt),
-      })));
-    }
 
     req.session.userId = user.id;
 
@@ -465,6 +455,8 @@ const start = async () => {
       chronoAge: Math.round(chronoAge * 10) / 10,
       role: user.role, organizationId: user.organizationId,
       emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
+      healthDataConsentAt: user.healthDataConsentAt?.toISOString() ?? null,
+      healthDataConsentVersion: user.healthDataConsentVersion ?? null,
     };
   });
 
@@ -1373,11 +1365,12 @@ const start = async () => {
     const user = await requireUser(req, reply);
     if (!user) return;
 
-    const [userSources, userSamples, userSnapshots, userShareTokens] = await Promise.all([
+    const [userSources, userSamples, userSnapshots, userShareTokens, userConsents] = await Promise.all([
       db.select().from(sources).where(eq(sources.userId, user.id)),
       db.select().from(samples).where(eq(samples.userId, user.id)),
       db.select().from(scoreSnapshots).where(eq(scoreSnapshots.userId, user.id)),
       db.select().from(shareTokens).where(eq(shareTokens.userId, user.id)),
+      db.select().from(healthDataConsents).where(eq(healthDataConsents.userId, user.id)).orderBy(desc(healthDataConsents.grantedAt)),
     ]);
 
     const exportData = {
@@ -1387,6 +1380,17 @@ const start = async () => {
         birthDate: user.birthDate,
         sex: user.sex,
         createdAt: user.createdAt.toISOString(),
+      },
+      consent: {
+        current: {
+          consentedAt: user.healthDataConsentAt?.toISOString() ?? null,
+          version: user.healthDataConsentVersion ?? null,
+        },
+        history: userConsents.map((c) => ({
+          version: c.version,
+          grantedAt: c.grantedAt.toISOString(),
+          revokedAt: c.revokedAt?.toISOString() ?? null,
+        })),
       },
       sources: userSources.map((s) => ({
         id: s.id, kind: s.kind, adapter: s.adapter, enabled: s.enabled,
@@ -1412,6 +1416,81 @@ const start = async () => {
     const date = new Date().toISOString().slice(0, 10);
     reply.header('Content-Disposition', `attachment; filename="longevity-export-${date}.json"`);
     return reply.type('application/json').send(exportData);
+  });
+
+  // ── Health Data Consent (GDPR Art. 9) ──────────────────────────────────────────
+
+  app.get('/api/account/consent', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    return {
+      hasConsented: Boolean(user.healthDataConsentAt),
+      consentAt: user.healthDataConsentAt?.toISOString() ?? null,
+      version: user.healthDataConsentVersion ?? null,
+      latestVersion: CURRENT_HEALTH_DATA_CONSENT_VERSION,
+      consentText: HEALTH_DATA_CONSENT_TEXT,
+    };
+  });
+
+  const consentBodySchema = z.object({
+    version: z.string().min(1).default(CURRENT_HEALTH_DATA_CONSENT_VERSION),
+  });
+
+  app.post('/api/account/consent', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const parsed = consentBodySchema.safeParse(req.body ?? {});
+    const version = parsed.success ? parsed.data.version : CURRENT_HEALTH_DATA_CONSENT_VERSION;
+    const now = new Date();
+
+    const ipAddress = req.ip || (req.headers['x-forwarded-for'] as string) || null;
+    const userAgent = (req.headers['user-agent'] as string) || null;
+
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({
+        healthDataConsentAt: now,
+        healthDataConsentVersion: version,
+      }).where(eq(users.id, user.id));
+
+      await tx.insert(healthDataConsents).values({
+        userId: user.id,
+        version,
+        grantedAt: now,
+        ipAddress: ipAddress ? String(ipAddress).slice(0, 255) : null,
+        userAgent: userAgent ? String(userAgent).slice(0, 500) : null,
+      });
+    });
+
+    return {
+      ok: true,
+      consentAt: now.toISOString(),
+      version,
+    };
+  });
+
+  app.post('/api/account/consent/revoke', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const now = new Date();
+
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({
+        healthDataConsentAt: null,
+        healthDataConsentVersion: null,
+      }).where(eq(users.id, user.id));
+
+      await tx.update(healthDataConsents).set({
+        revokedAt: now,
+      }).where(and(
+        eq(healthDataConsents.userId, user.id),
+        sql`revoked_at IS NULL`
+      ));
+    });
+
+    return { ok: true, revokedAt: now.toISOString() };
   });
 
   app.delete('/api/account', async (req, reply) => {
