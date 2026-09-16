@@ -85,10 +85,27 @@ export class OAuthTokenError extends Error {
   }
 }
 
+export function isTokenError(err: unknown, message?: string): boolean {
+  if (err instanceof OAuthTokenError) return true;
+  const msg = (message ?? (err instanceof Error ? err.message : String(err))).toLowerCase();
+  return (
+    msg.includes('oauth') ||
+    msg.includes('token') ||
+    msg.includes('credential') ||
+    msg.includes('invalid_grant') ||
+    msg.includes('unauthorized') ||
+    msg.includes('401')
+  );
+}
+
 // Returns a valid access token for the given source, refreshing and persisting it first if it is close to expiry.
 export async function getValidToken(sourceId: string, provider: OAuthProvider): Promise<string> {
   const [source] = await db.select().from(sources).where(eq(sources.id, sourceId)).limit(1);
   if (!source?.credentials) {
+    await db.update(sources).set({
+      syncStatus: 'token_expired',
+      syncError: `Keine OAuth-Anmeldedaten hinterlegt (${provider.kind})`,
+    }).where(eq(sources.id, sourceId));
     throw new OAuthTokenError(`No OAuth credentials stored for source ${sourceId}`, 'NO_CREDENTIALS');
   }
 
@@ -101,11 +118,19 @@ export async function getValidToken(sourceId: string, provider: OAuthProvider): 
 
   try {
     const refreshed = await refreshToken(provider, credentials);
-    await db.update(sources).set({ credentials: refreshed }).where(eq(sources.id, sourceId));
+    await db.update(sources).set({
+      credentials: refreshed,
+      syncStatus: 'ok',
+      syncError: null,
+    }).where(eq(sources.id, sourceId));
     return refreshed.accessToken;
   } catch (err) {
-    // Refresh token expired or revoked -> clear credentials in DB so source can be reconnected cleanly
-    await db.update(sources).set({ credentials: null }).where(eq(sources.id, sourceId));
+    // Refresh token expired or revoked -> clear credentials in DB and set token_expired
+    await db.update(sources).set({
+      credentials: null,
+      syncStatus: 'token_expired',
+      syncError: `OAuth-Token-Erneuerung fehlgeschlagen (${provider.kind})`,
+    }).where(eq(sources.id, sourceId));
     throw new OAuthTokenError(
       `OAuth token refresh failed for ${provider.kind}: ${err instanceof Error ? err.message : String(err)}`,
       'REFRESH_FAILED'

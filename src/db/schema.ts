@@ -45,6 +45,8 @@ export const sessions = pgTable('sessions', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ userIdx: index().on(t.userId) }));
 
+export type SyncStatus = 'ok' | 'token_expired' | 'error';
+
 export const sources = pgTable('sources', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -53,6 +55,8 @@ export const sources = pgTable('sources', {
   enabled: boolean('enabled').notNull().default(true),
   consentAt: timestamp('consent_at', { withTimezone: true }),
   lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+  syncStatus: text('sync_status').$type<SyncStatus>().default('ok'),
+  syncError: text('sync_error'),
   credentials: jsonb('credentials').$type<OAuthCredentials>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ uniq: unique().on(t.userId, t.kind) }));
