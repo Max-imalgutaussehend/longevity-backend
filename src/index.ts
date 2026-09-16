@@ -872,6 +872,12 @@ const start = async () => {
     const { provider } = req.params as { provider: string };
     const oauthProvider = oauthProviders[provider];
     if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+    if (!oauthProvider.clientId) {
+      return reply.status(400).send({
+        title: `${provider} ist noch nicht konfiguriert (Client-ID fehlt).`,
+        code: 'OAUTH_NOT_CONFIGURED',
+      });
+    }
 
     const body = (req.body as { redirectUri?: string } | undefined) ?? {};
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
@@ -893,11 +899,24 @@ const start = async () => {
     return { url: url.toString() };
   });
 
+  // HEAD handler for providers (e.g. Withings) that probe callback reachability
+  app.head('/api/oauth/callback/:provider', async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    const oauthProvider = oauthProviders[provider];
+    if (!oauthProvider) return reply.status(404).send();
+    return reply.status(200).send();
+  });
+
   app.get('/api/oauth/callback/:provider', async (req, reply) => {
     const { provider } = req.params as { provider: string };
     const { code, state } = req.query as { code?: string; state?: string };
     const oauthProvider = oauthProviders[provider];
     if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+
+    // Withings and other OAuth providers ping callback URLs with empty GET/HEAD to verify reachability
+    if (!code && !state) {
+      return reply.status(200).send({ ok: true, message: 'OAuth callback endpoint ready.' });
+    }
     if (!code || !state) return reply.status(400).send({ title: 'code oder state fehlt.' });
 
     const sourceKind = providerToSourceKind(provider);
@@ -939,10 +958,18 @@ const start = async () => {
 
     const acceptsHtml = req.headers.accept?.includes('text/html');
     if (acceptsHtml) {
-      return reply.redirect('/daten?connected=' + encodeURIComponent(provider));
+      const targetUrl = env.NODE_ENV === 'development'
+        ? `http://localhost:5173/daten?connected=${encodeURIComponent(provider)}`
+        : `/daten?connected=${encodeURIComponent(provider)}`;
+      return reply.redirect(targetUrl);
     }
 
     return reply.status(200).send({ ok: true, sourceId: src.id });
+  });
+
+  // HEAD handler for Google OAuth callback reachability probe
+  app.head('/api/sources/google/callback', async (_req, reply) => {
+    return reply.status(200).send();
   });
 
   // Alias for Google OAuth callback if registered as /api/sources/google/callback
@@ -950,6 +977,11 @@ const start = async () => {
     const { code, state } = req.query as { code?: string; state?: string };
     const oauthProvider = oauthProviders['google-fit'];
     if (!oauthProvider) return reply.status(404).send({ title: 'Unbekannter Provider.' });
+
+    // Reachability probe
+    if (!code && !state) {
+      return reply.status(200).send({ ok: true, message: 'OAuth callback endpoint ready.' });
+    }
     if (!code || !state) return reply.status(400).send({ title: 'code oder state fehlt.' });
 
     let userId: string;
@@ -986,7 +1018,10 @@ const start = async () => {
 
     const acceptsHtml = req.headers.accept?.includes('text/html');
     if (acceptsHtml) {
-      return reply.redirect('/daten?connected=google-fit');
+      const targetUrl = env.NODE_ENV === 'development'
+        ? `http://localhost:5173/daten?connected=google-fit`
+        : `/daten?connected=google-fit`;
+      return reply.redirect(targetUrl);
     }
 
     return reply.status(200).send({ ok: true, sourceId: src.id });
