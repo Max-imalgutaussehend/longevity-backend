@@ -36,3 +36,94 @@ describe('OAuth tokens & sync status helpers', () => {
     expect(isTokenError(new Error('Database query failed'))).toBe(false);
   });
 });
+
+describe('parseTokenResponse', () => {
+  let parseTokenResponse: (raw: unknown, defaultScope: string, fallbackRefreshToken?: string) => {
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: string;
+    scope: string;
+  };
+
+  beforeAll(async () => {
+    const mod = await import('../lib/oauthTokens.js');
+    parseTokenResponse = mod.parseTokenResponse;
+  });
+
+  it('parses standard flat OAuth2 response', () => {
+    const raw = {
+      access_token: 'flat_access_123',
+      refresh_token: 'flat_refresh_123',
+      expires_in: 7200,
+      scope: 'read write',
+    };
+
+    const parsed = parseTokenResponse(raw, 'default_scope');
+    expect(parsed.accessToken).toBe('flat_access_123');
+    expect(parsed.refreshToken).toBe('flat_refresh_123');
+    expect(parsed.scope).toBe('read write');
+    expect(new Date(parsed.expiresAt).getTime()).toBeGreaterThan(Date.now() + 7000 * 1000);
+  });
+
+  it('parses nested Withings-style response (status: 0, body: {...})', () => {
+    const raw = {
+      status: 0,
+      body: {
+        access_token: 'withings_acc_token',
+        refresh_token: 'withings_ref_token',
+        expires_in: 10800,
+        scope: 'user.metrics,user.activity',
+        userid: '12345',
+      },
+    };
+
+    const parsed = parseTokenResponse(raw, 'user.info');
+    expect(parsed.accessToken).toBe('withings_acc_token');
+    expect(parsed.refreshToken).toBe('withings_ref_token');
+    expect(parsed.scope).toBe('user.metrics,user.activity');
+    expect(new Date(parsed.expiresAt).getTime()).toBeGreaterThan(Date.now() + 10000 * 1000);
+  });
+
+  it('throws when Withings status is non-zero', () => {
+    const raw = {
+      status: 253,
+      error: 'The request is not valid',
+    };
+
+    expect(() => parseTokenResponse(raw, 'default_scope')).toThrow(
+      'OAuth provider returned error: The request is not valid',
+    );
+  });
+
+  it('falls back to 3600s if expires_in is missing or invalid without throwing Invalid time value', () => {
+    const raw = {
+      access_token: 'some_access_token',
+      expires_in: undefined,
+    };
+
+    const parsed = parseTokenResponse(raw, 'default_scope');
+    expect(parsed.accessToken).toBe('some_access_token');
+    expect(parsed.refreshToken).toBe('');
+    expect(parsed.scope).toBe('default_scope');
+    expect(isNaN(new Date(parsed.expiresAt).getTime())).toBe(false);
+    expect(new Date(parsed.expiresAt).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('uses fallbackRefreshToken when response does not return refresh_token', () => {
+    const raw = {
+      access_token: 'new_access_token',
+      expires_in: 3600,
+    };
+
+    const parsed = parseTokenResponse(raw, 'default_scope', 'old_refresh_token');
+    expect(parsed.accessToken).toBe('new_access_token');
+    expect(parsed.refreshToken).toBe('old_refresh_token');
+  });
+
+  it('throws on non-object or missing access_token', () => {
+    expect(() => parseTokenResponse(null, 'scope')).toThrow('payload is not an object');
+    expect(() => parseTokenResponse('string', 'scope')).toThrow('payload is not an object');
+    expect(() => parseTokenResponse({}, 'scope')).toThrow('missing access_token');
+    expect(() => parseTokenResponse({ body: {} }, 'scope')).toThrow('missing access_token');
+  });
+});
