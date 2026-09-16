@@ -19,6 +19,7 @@
     "db:studio": "drizzle-kit studio",
     "seed:demo": "tsx src/seed/demo.ts",
     "seed:offers": "tsx src/seed/offers.ts",
+    "seed:admin": "tsx src/seed/adminUser.ts",
     "invite:insurer": "tsx src/seed/inviteInsurer.ts",
     "gen:openapi": "tsx src/scripts/genOpenApi.ts"
   },
