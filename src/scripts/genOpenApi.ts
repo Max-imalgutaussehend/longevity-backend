@@ -135,6 +135,32 @@ paths['/insurer/offers/{id}'] = {
     responses: { 204: { description: 'Deleted' }, 403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401 } },
 };
 
+paths['/contact/insurer'] = {
+  post: { operationId: 'submitInsurerContactRequest', tags: ['Insurer'], security: publicSecurity, summary: 'Submit a B2B contact request from a health insurer or partner',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['company', 'name', 'email'],
+      properties: { company: { type: 'string' }, name: { type: 'string' }, email: { type: 'string', format: 'email' }, message: { type: 'string' } },
+    } } } },
+    responses: { 201: { description: 'Created', content: { 'application/json': { schema: { type: 'object', properties: { id: { type: 'string' } } } } } }, 400: { description: 'Validation error' } } },
+};
+
+paths['/admin/insurer-requests'] = {
+  get: { operationId: 'listInsurerRequests', tags: ['Admin'], summary: 'List all insurer contact requests',
+    responses: { 200: { description: 'InsurerRequest[]' }, 403: { description: 'Not a platform admin' }, ...auth401 } },
+};
+
+paths['/admin/insurer-requests/{id}/approve'] = {
+  post: { operationId: 'approveInsurerRequest', tags: ['Admin'], summary: 'Approve a request: creates the organization + insurer_admin user and sends an invite email',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: { 200: { description: 'OK' }, 400: { description: 'Already decided' }, 403: { description: 'Not a platform admin' }, 404: { description: 'Not found' }, 409: { description: 'E-Mail already registered' }, ...auth401 } },
+};
+
+paths['/admin/insurer-requests/{id}/reject'] = {
+  post: { operationId: 'rejectInsurerRequest', tags: ['Admin'], summary: 'Reject a request',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: { 200: { description: 'OK' }, 400: { description: 'Already decided' }, 403: { description: 'Not a platform admin' }, 404: { description: 'Not found' }, ...auth401 } },
+};
+
 paths['/score/current'] = {
   get: { operationId: 'getScoreCurrent', tags: ['Score'], summary: 'Current score + lazy snapshot',
     responses: { 200: { description: 'ScoreResult', content: { 'application/json': { schema: ref('ScoreResult') } } }, ...auth401 } },

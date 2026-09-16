@@ -79,6 +79,16 @@ export function passwordResetTemplate(resetUrl: string): { subject: string; html
   };
 }
 
+export function insurerRequestReceivedTemplate(company: string): { subject: string; html: string } {
+  return {
+    subject: 'Ihre Anfrage bei LONGEVITY ist eingegangen',
+    html: layout('Anfrage erhalten', `
+      <p style="margin:0 0 16px;">Hallo,</p>
+      <p style="margin:0 0 24px;color:${TEXT_MUTED};">vielen Dank für Ihr Interesse an LONGEVITY für <strong style="color:${TEXT_DARK};">${escapeHtml(company)}</strong>. Wir haben Ihre Anfrage erhalten und melden uns in Kürze persönlich bei Ihnen.</p>
+    `),
+  };
+}
+
 export function insurerInviteTemplate(orgName: string, inviteUrl: string): { subject: string; html: string } {
   return {
     subject: 'Einladung: LONGEVITY-Zugang für Krankenkassen',
