@@ -44,7 +44,11 @@ export function parseOuraSleep(response: OuraSleepResponse): Sample[] {
       measuredAt: daySampleTime(entry.day),
       sourceKind: 'oura',
     });
-    bedtimes.push(new Date(entry.bedtime_start).getHours() * 60 + new Date(entry.bedtime_start).getMinutes());
+    const btDate = new Date(entry.bedtime_start);
+    const hour = btDate.getHours();
+    const minute = btDate.getMinutes();
+    const minFromNoon = hour >= 12 ? (hour - 12) * 60 + minute : (hour + 12) * 60 + minute;
+    bedtimes.push(minFromNoon);
   }
 
   if (bedtimes.length >= 2) {
