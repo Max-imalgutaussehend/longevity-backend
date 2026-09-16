@@ -226,19 +226,6 @@ const start = async () => {
       email, passwordHash, birthDate, sex, displayName: displayName ?? null,
     }).returning();
 
-    const [src] = await db.insert(sources).values({
-      userId: user.id, kind: 'apple_health', adapter: 'mock', enabled: true, lastSyncAt: new Date(),
-    }).returning();
-
-    const mockSamples = generate(user.id.charCodeAt(0) * 31 + 7, 90);
-    if (mockSamples.length > 0) {
-      await db.insert(samples).values(mockSamples.map(s => ({
-        userId: user.id, sourceId: src.id,
-        metric: s.metric, value: s.value, unit: s.unit,
-        measuredAt: new Date(s.measuredAt),
-      })));
-    }
-
     req.session.userId = user.id;
 
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
