@@ -1,0 +1,22 @@
+{
+  "profile": { "birthDate": "1997-03-14", "sex": "m" },
+  "now": "2026-09-09T12:00:00.000Z",
+  "samples": [
+    { "metric": "vo2max", "value": 10, "unit": "ml/kg/min", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "resting_hr", "value": 30, "unit": "bpm", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "hrv_rmssd", "value": 5, "unit": "ms", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "oura" },
+    { "metric": "sleep_duration", "value": 1.5, "unit": "h", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "oura" },
+    { "metric": "sleep_consistency", "value": 0, "unit": "min", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "oura" },
+    { "metric": "zone2_minutes", "value": 0, "unit": "min/week", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "steps", "value": 0, "unit": "steps/day", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "strength_sessions", "value": 0, "unit": "/week", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "apple_health" },
+    { "metric": "ldl", "value": 20, "unit": "mg/dL", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "lab" },
+    { "metric": "hdl", "value": 10, "unit": "mg/dL", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "lab" },
+    { "metric": "hba1c", "value": 3.0, "unit": "%", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "lab" },
+    { "metric": "systolic_bp", "value": 60, "unit": "mmHg", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "lab" },
+    { "metric": "waist", "value": 45, "unit": "cm", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "lab" },
+    { "metric": "smoking", "value": 0, "unit": "category", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "questionnaire" },
+    { "metric": "alcohol_units", "value": 0, "unit": "units/week", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "questionnaire" },
+    { "metric": "hscrp", "value": 0.05, "unit": "mg/L", "measuredAt": "2026-09-08T00:00:00.000Z", "sourceKind": "lab" }
+  ]
+}
