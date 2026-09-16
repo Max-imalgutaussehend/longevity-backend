@@ -19,6 +19,9 @@ export const oauthProviders: Record<string, OAuthProvider> = {
     clientSecret: env.WITHINGS_CLIENT_SECRET,
     scope: 'user.metrics,user.activity',
     redirectUri: (baseUrl) => `${baseUrl}/api/oauth/callback/withings`,
+    extraTokenParams: {
+      action: 'requesttoken',
+    },
   },
   'google-fit': {
     kind: 'google-fit',

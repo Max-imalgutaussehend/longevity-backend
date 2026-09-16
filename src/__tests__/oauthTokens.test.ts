@@ -127,3 +127,96 @@ describe('parseTokenResponse', () => {
     expect(() => parseTokenResponse({ body: {} }, 'scope')).toThrow('missing access_token');
   });
 });
+
+describe('exchangeCodeForToken', () => {
+  let exchangeCodeForToken: typeof import('../lib/oauthTokens.js').exchangeCodeForToken;
+
+  beforeAll(async () => {
+    const mod = await import('../lib/oauthTokens.js');
+    exchangeCodeForToken = mod.exchangeCodeForToken;
+  });
+
+  it('includes action=requesttoken for Withings provider', async () => {
+    let capturedBody = '';
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      capturedBody = init?.body ? String(init.body) : '';
+      return {
+        ok: true,
+        json: async () => ({
+          status: 0,
+          body: {
+            access_token: 'test_access',
+            refresh_token: 'test_refresh',
+            expires_in: 3600,
+          },
+        }),
+      } as unknown as Response;
+    }) as typeof globalThis.fetch;
+
+    try {
+      const provider = {
+        kind: 'withings',
+        authorizeUrl: 'https://example.com/auth',
+        tokenUrl: 'https://wbsapi.withings.net/v2/oauth2',
+        clientId: 'test-client',
+        clientSecret: 'test-secret',
+        scope: 'user.metrics',
+        redirectUri: () => 'https://example.com/cb',
+      };
+
+      const result = await exchangeCodeForToken(provider, 'auth_code_123', 'https://example.com');
+      const params = new URLSearchParams(capturedBody);
+
+      expect(params.get('action')).toBe('requesttoken');
+      expect(params.get('grant_type')).toBe('authorization_code');
+      expect(params.get('code')).toBe('auth_code_123');
+      expect(params.get('client_id')).toBe('test-client');
+      expect(params.get('client_secret')).toBe('test-secret');
+      expect(result.accessToken).toBe('test_access');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('includes extraTokenParams if specified on provider', async () => {
+    let capturedBody = '';
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      capturedBody = init?.body ? String(init.body) : '';
+      return {
+        ok: true,
+        json: async () => ({
+          access_token: 'custom_access',
+          expires_in: 3600,
+        }),
+      } as unknown as Response;
+    }) as typeof globalThis.fetch;
+
+    try {
+      const provider = {
+        kind: 'custom',
+        authorizeUrl: 'https://example.com/auth',
+        tokenUrl: 'https://example.com/token',
+        clientId: 'cid',
+        clientSecret: 'csec',
+        scope: 'custom.scope',
+        redirectUri: () => 'https://example.com/cb',
+        extraTokenParams: {
+          audience: 'my-api',
+        },
+      };
+
+      const result = await exchangeCodeForToken(provider, 'code_xyz', 'https://example.com');
+      const params = new URLSearchParams(capturedBody);
+
+      expect(params.get('audience')).toBe('my-api');
+      expect(params.get('grant_type')).toBe('authorization_code');
+      expect(result.accessToken).toBe('custom_access');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
