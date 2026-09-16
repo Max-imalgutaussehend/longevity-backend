@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { parseGoogleFitAggregate, parseGoogleHealthV4DataPoints, consolidateDailyZone2Samples, type GoogleFitAggregateResponse } from '../../adapters/googleFit.js';
+import {
+  parseGoogleFitAggregate,
+  parseGoogleHealthV4DataPoints,
+  consolidateDailyZone2Samples,
+  extractGoogleHealthOrigin,
+  getOriginPriority,
+  type GoogleFitAggregateResponse,
+} from '../../adapters/googleFit.js';
 import rawFixture from '../__fixtures__/google_fit_aggregate.json';
 
 const fixture = rawFixture as GoogleFitAggregateResponse;
@@ -57,6 +64,38 @@ describe('parseGoogleFitAggregate', () => {
       }],
     });
     expect(samples).toEqual([]);
+  });
+
+  it('deduplicates steps across multiple datasets in the same bucket prioritizing estimated_steps', () => {
+    const samples = parseGoogleFitAggregate({
+      bucket: [{
+        startTimeMillis: '1726358400000',
+        endTimeMillis: '1726444800000',
+        dataset: [
+          {
+            dataSourceId: 'derived:com.google.step_count.delta:com.google.android.gms:estimated_steps',
+            point: [{
+              startTimeNanos: '1726358400000000000',
+              endTimeNanos: '1726444800000000000',
+              dataTypeName: 'com.google.step_count.delta',
+              value: [{ intVal: 7360 }],
+            }],
+          },
+          {
+            dataSourceId: 'raw:com.google.step_count.delta:com.fitbit.FitBitMobile:tracker',
+            point: [{
+              startTimeNanos: '1726358400000000000',
+              endTimeNanos: '1726444800000000000',
+              dataTypeName: 'com.google.step_count.delta',
+              value: [{ intVal: 9250 }],
+            }],
+          },
+        ],
+      }],
+    });
+    const steps = samples.filter(s => s.metric === 'steps');
+    expect(steps).toHaveLength(1);
+    expect(steps[0].value).toBe(7360);
   });
 });
 
@@ -354,6 +393,123 @@ describe('parseGoogleHealthV4DataPoints', () => {
     const steps = consolidated.filter(s => s.metric === 'steps');
     expect(steps).toHaveLength(1);
     expect(steps[0].value).toBe(12808);
+  });
+
+  it('deduplicates multi-source Google Health v4 step data with dataSource metadata to 7360 instead of 25860', () => {
+    const samples = parseGoogleHealthV4DataPoints('steps', [
+      {
+        steps: {
+          count: '7360',
+          interval: {
+            startTime: '2026-09-15T00:00:00Z',
+            endTime: '2026-09-15T23:59:59Z',
+            civilStartTime: { date: { year: 2026, month: 9, day: 15 } },
+          },
+        },
+        dataSource: {
+          platform: 'HEALTH_CONNECT',
+          application: { packageName: 'com.google.android.apps.fitness' },
+          device: { displayName: 'Google' },
+        },
+      },
+      {
+        steps: {
+          count: '9250',
+          interval: {
+            startTime: '2026-09-15T00:00:00Z',
+            endTime: '2026-09-15T23:59:59Z',
+            civilStartTime: { date: { year: 2026, month: 9, day: 15 } },
+          },
+        },
+        dataSource: {
+          platform: 'FITBIT',
+          device: { displayName: 'MobileTrack' },
+        },
+      },
+      {
+        steps: {
+          count: '9250',
+          interval: {
+            startTime: '2026-09-15T00:00:00Z',
+            endTime: '2026-09-15T23:59:59Z',
+            civilStartTime: { date: { year: 2026, month: 9, day: 15 } },
+          },
+        },
+        dataSource: {
+          platform: 'HEALTH_CONNECT',
+          application: { packageName: 'com.android.healthconnect.phone' },
+          device: { displayName: 'Google' },
+        },
+      },
+    ]);
+
+    expect(samples).toHaveLength(1);
+    expect(samples[0].value).toBe(7360);
+    expect(samples[0].metric).toBe('steps');
+  });
+
+  it('deduplicates active-minutes across multiple origins prioritizing Google Fit', () => {
+    const samples = parseGoogleHealthV4DataPoints('active-minutes', [
+      {
+        activeMinutes: {
+          interval: { startTime: '2026-09-15T08:00:00Z', endTime: '2026-09-15T09:00:00Z' },
+          activeMinutesByActivityLevel: [{ activeMinutes: 45 }],
+        },
+        dataSource: {
+          platform: 'HEALTH_CONNECT',
+          application: { packageName: 'com.google.android.apps.fitness' },
+        },
+      },
+      {
+        activeMinutes: {
+          interval: { startTime: '2026-09-15T08:00:00Z', endTime: '2026-09-15T09:00:00Z' },
+          activeMinutesByActivityLevel: [{ activeMinutes: 50 }],
+        },
+        dataSource: {
+          platform: 'FITBIT',
+          device: { displayName: 'MobileTrack' },
+        },
+      },
+    ]);
+
+    expect(samples).toHaveLength(1);
+    expect(samples[0].value).toBe(45);
+    expect(samples[0].metric).toBe('zone2_minutes');
+  });
+});
+
+describe('extractGoogleHealthOrigin', () => {
+  it('extracts packageName from dataSource application', () => {
+    const origin = extractGoogleHealthOrigin({
+      dataSource: { application: { packageName: 'com.google.android.apps.fitness' } },
+    });
+    expect(origin).toBe('com.google.android.apps.fitness');
+  });
+
+  it('extracts platform and device displayName when application is absent', () => {
+    const origin = extractGoogleHealthOrigin({
+      dataSource: { platform: 'FITBIT', device: { displayName: 'MobileTrack' } },
+    });
+    expect(origin).toBe('FITBIT:MobileTrack');
+  });
+
+  it('falls back to metadata, dataSourceId or unknown', () => {
+    expect(extractGoogleHealthOrigin({ metadata: { dataOrigin: { packageName: 'custom.app' } } })).toBe('custom.app');
+    expect(extractGoogleHealthOrigin({ dataSourceId: 'ds-123' })).toBe('ds-123');
+    expect(extractGoogleHealthOrigin({})).toBe('unknown');
+  });
+});
+
+describe('getOriginPriority', () => {
+  it('prioritizes Google Fit higher than Fitbit and Health Connect', () => {
+    const fit = getOriginPriority('com.google.android.apps.fitness');
+    const fitbit = getOriginPriority('fitbit:mobiletrack');
+    const hc = getOriginPriority('com.android.healthconnect.phone');
+    const unknown = getOriginPriority('unknown');
+
+    expect(fit).toBeGreaterThan(fitbit);
+    expect(fitbit).toBeGreaterThan(hc);
+    expect(hc).toBeGreaterThan(unknown);
   });
 });
 

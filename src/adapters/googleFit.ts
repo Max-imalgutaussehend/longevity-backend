@@ -43,37 +43,96 @@ function pointValue(point: GoogleFitPoint): number | null {
   return v.intVal ?? v.fpVal ?? null;
 }
 
+function getFitDataSourcePriority(dsId: string): number {
+  const d = dsId.toLowerCase();
+  if (d.includes('estimated_steps')) return 100;
+  if (d.includes('merge')) return 90;
+  if (d.includes('google.android.gms')) return 85;
+  if (d.includes('google')) return 80;
+  return 50;
+}
+
 export function parseGoogleFitAggregate(response: GoogleFitAggregateResponse): Sample[] {
   const samples: Sample[] = [];
 
   for (const bucket of response.bucket ?? []) {
+    // Collect step points by dataset / dataSourceId to avoid multiplying across multiple step data sources
+    const stepDatasets = new Map<string, GoogleFitPoint[]>();
+    const otherPoints: GoogleFitPoint[] = [];
+
     for (const dataset of bucket.dataset ?? []) {
       for (const point of dataset.point ?? []) {
-        const value = pointValue(point);
-        if (value === null) continue;
-
-        const endMs = Number(BigInt(point.endTimeNanos) / 1_000_000n);
-        const measuredAt = endMs > Date.now()
-          ? new Date().toISOString()
-          : nanosToIso(point.endTimeNanos);
-
         if (point.dataTypeName === DATA_TYPE_STEPS) {
-          samples.push({ metric: 'steps', value, unit: 'steps', measuredAt, sourceKind: 'google_fit' });
-        } else if (point.dataTypeName === DATA_TYPE_HEART_RATE) {
-          samples.push({ metric: 'resting_hr', value, unit: 'bpm', measuredAt, sourceKind: 'google_fit' });
-        } else if (point.dataTypeName === DATA_TYPE_SLEEP) {
-          const startNanos = BigInt(point.startTimeNanos);
-          const endNanos = BigInt(point.endTimeNanos);
-          const hours = Number(endNanos - startNanos) / 1e9 / 3600;
-          samples.push({ metric: 'sleep_duration', value: hours, unit: 'h', measuredAt, sourceKind: 'google_fit' });
-        } else if (point.dataTypeName === DATA_TYPE_ACTIVE_MINUTES) {
-          samples.push({ metric: 'zone2_minutes', value, unit: 'min', measuredAt, sourceKind: 'google_fit' });
+          const list = stepDatasets.get(dataset.dataSourceId) ?? [];
+          list.push(point);
+          stepDatasets.set(dataset.dataSourceId, list);
+        } else {
+          otherPoints.push(point);
         }
+      }
+    }
+
+    // Process steps: pick the top priority dataSource to avoid summing multiple devices/trackers
+    if (stepDatasets.size > 0) {
+      const sortedDs = Array.from(stepDatasets.entries()).sort(
+        (a, b) => getFitDataSourcePriority(b[0]) - getFitDataSourcePriority(a[0]),
+      );
+      const chosenPoints = sortedDs[0]?.[1] ?? [];
+      let totalSteps = 0;
+      let lastMeasuredAt: string | null = null;
+      for (const pt of chosenPoints) {
+        const val = pointValue(pt);
+        if (val !== null) {
+          totalSteps += val;
+          const endMs = Number(BigInt(pt.endTimeNanos) / 1_000_000n);
+          lastMeasuredAt = endMs > Date.now() ? new Date().toISOString() : nanosToIso(pt.endTimeNanos);
+        }
+      }
+      if (totalSteps > 0 && lastMeasuredAt) {
+        samples.push({ metric: 'steps', value: totalSteps, unit: 'steps', measuredAt: lastMeasuredAt, sourceKind: 'google_fit' });
+      }
+    }
+
+    // Process other points (heart rate, sleep, active minutes)
+    for (const point of otherPoints) {
+      const value = pointValue(point);
+      if (value === null) continue;
+
+      const endMs = Number(BigInt(point.endTimeNanos) / 1_000_000n);
+      const measuredAt = endMs > Date.now()
+        ? new Date().toISOString()
+        : nanosToIso(point.endTimeNanos);
+
+      if (point.dataTypeName === DATA_TYPE_HEART_RATE) {
+        samples.push({ metric: 'resting_hr', value, unit: 'bpm', measuredAt, sourceKind: 'google_fit' });
+      } else if (point.dataTypeName === DATA_TYPE_SLEEP) {
+        const startNanos = BigInt(point.startTimeNanos);
+        const endNanos = BigInt(point.endTimeNanos);
+        const hours = Number(endNanos - startNanos) / 1e9 / 3600;
+        samples.push({ metric: 'sleep_duration', value: hours, unit: 'h', measuredAt, sourceKind: 'google_fit' });
+      } else if (point.dataTypeName === DATA_TYPE_ACTIVE_MINUTES) {
+        samples.push({ metric: 'zone2_minutes', value, unit: 'min', measuredAt, sourceKind: 'google_fit' });
       }
     }
   }
 
   return samples;
+}
+
+export interface GoogleHealthDataSource {
+  recordingMethod?: string;
+  platform?: string;
+  application?: {
+    packageName?: string;
+    version?: string;
+  };
+  device?: {
+    manufacturer?: string;
+    model?: string;
+    type?: string;
+    displayName?: string;
+    formFactor?: string;
+  };
 }
 
 export interface GoogleHealthDataPoint {
@@ -82,6 +141,7 @@ export interface GoogleHealthDataPoint {
   updateTime?: string;
   dataSourceId?: string;
   origin?: string;
+  dataSource?: GoogleHealthDataSource;
   metadata?: {
     dataOrigin?: { packageName?: string };
     device?: { manufacturer?: string; model?: string; type?: string };
@@ -121,14 +181,32 @@ export interface GoogleHealthDataPoint {
   };
 }
 
-function getOriginPriority(origin: string): number {
+export function extractGoogleHealthOrigin(dp: GoogleHealthDataPoint): string {
+  const appPkg = dp.dataSource?.application?.packageName ?? dp.metadata?.dataOrigin?.packageName;
+  const platform = dp.dataSource?.platform;
+  const devName = dp.dataSource?.device?.displayName;
+
+  if (appPkg) return appPkg;
+  if (platform && devName) return `${platform}:${devName}`;
+  if (platform) return platform;
+  if (dp.dataSourceId) return dp.dataSourceId;
+  if (dp.origin) return dp.origin;
+  return 'unknown';
+}
+
+export function getOriginPriority(origin: string): number {
   const o = origin.toLowerCase();
+  // Direct Google Fit app has highest precedence (canonical user dashboard on phone)
   if (o.includes('com.google.android.apps.fitness')) return 100;
   if (o.includes('com.google.android.gms')) return 95;
   if (o.includes('google')) return 90;
+  // Wearables / dedicated health platforms
   if (o.includes('fitbit')) return 80;
-  if (o.includes('fitness') || o.includes('health')) return 70;
-  if (o.length > 0) return 50;
+  if (o.includes('garmin') || o.includes('polar') || o.includes('withings') || o.includes('oura')) return 78;
+  if (o.includes('samsung') || o.includes('shealth')) return 75;
+  if (o.includes('healthconnect') || o.includes('health')) return 70;
+  if (o.includes('fitness')) return 65;
+  if (o.length > 0 && o !== 'unknown') return 50;
   return 10;
 }
 
@@ -171,10 +249,7 @@ export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: Goog
       // An interval spanning >= 12 hours represents a full-day cumulative summary record
       const isCumulative = durationMs >= 12 * 3600 * 1000;
 
-      const origin = dp.metadata?.dataOrigin?.packageName
-        ?? dp.dataSourceId
-        ?? dp.origin
-        ?? '';
+      const origin = extractGoogleHealthOrigin(dp);
 
       const list = pointsByDay.get(dayStr) ?? [];
       list.push({ count, startMs, endMs, durationMs, isCumulative, origin });
@@ -211,8 +286,12 @@ export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: Goog
         (a, b) => getOriginPriority(b[0]) - getOriginPriority(a[0]),
       );
 
-      // Take the top priority origin's count to avoid summing multiple apps/devices together
-      let finalCount = sortedOrigins[0]?.[1] ?? 0;
+      // Take the top priority origin's count to avoid summing multiple apps/devices together.
+      // Filter viable candidate origins to avoid selecting an inactive background origin (e.g. only 20 steps).
+      const maxCount = Math.max(...originTotals.values());
+      const minThreshold = maxCount >= 1000 ? maxCount * 0.20 : 0;
+      const viableOrigins = sortedOrigins.filter(entry => entry[1] >= minThreshold);
+      let finalCount = viableOrigins[0]?.[1] ?? sortedOrigins[0]?.[1] ?? maxCount;
 
       // Fallback: if finalCount is 0, check for any cumulative record
       if (finalCount <= 0) {
@@ -304,7 +383,8 @@ export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: Goog
       }
     }
   } else if (dataType === 'active-minutes') {
-    const dailyActiveMins = new Map<string, number>();
+    // Group active minutes by day and origin to avoid summing multiple trackers (e.g. Fitbit + Google Fit)
+    const pointsByDay = new Map<string, Array<{ minutes: number; origin: string }>>();
 
     for (const dp of dataPoints) {
       if (!dp.activeMinutes) continue;
@@ -317,18 +397,38 @@ export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: Goog
       if (iso) dayStr = iso.slice(0, 10);
       if (!dayStr) continue;
 
-      dailyActiveMins.set(dayStr, (dailyActiveMins.get(dayStr) ?? 0) + totalMinutes);
+      const origin = extractGoogleHealthOrigin(dp);
+      const list = pointsByDay.get(dayStr) ?? [];
+      list.push({ minutes: totalMinutes, origin });
+      pointsByDay.set(dayStr, list);
     }
 
     const todayStr = new Date().toISOString().slice(0, 10);
-    for (const [dayStr, totalMinutes] of dailyActiveMins.entries()) {
+    for (const [dayStr, dayPoints] of pointsByDay.entries()) {
+      // Sum per origin
+      const originTotals = new Map<string, number>();
+      for (const pt of dayPoints) {
+        originTotals.set(pt.origin, (originTotals.get(pt.origin) ?? 0) + pt.minutes);
+      }
+
+      // Pick top-priority origin with meaningful minutes, or max
+      const sortedOrigins = Array.from(originTotals.entries()).sort(
+        (a, b) => getOriginPriority(b[0]) - getOriginPriority(a[0]),
+      );
+      const maxMins = Math.max(...originTotals.values());
+      const minThreshold = maxMins >= 10 ? maxMins * 0.20 : 0;
+      const viableOrigins = sortedOrigins.filter(entry => entry[1] >= minThreshold);
+      const finalMinutes = viableOrigins[0]?.[1] ?? sortedOrigins[0]?.[1] ?? maxMins;
+
+      if (finalMinutes <= 0) continue;
+
       const measuredAt = dayStr === todayStr
         ? new Date().toISOString()
         : `${dayStr}T12:00:00.000Z`;
 
       samples.push({
         metric: 'zone2_minutes',
-        value: Math.round(totalMinutes * 10) / 10,
+        value: Math.round(finalMinutes * 10) / 10,
         unit: 'min',
         measuredAt,
         sourceKind: 'google_fit',
