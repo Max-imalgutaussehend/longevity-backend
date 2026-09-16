@@ -14,11 +14,50 @@ export interface OAuthProvider {
   redirectUri(baseUrl: string): string;
 }
 
-interface TokenResponse {
-  access_token: string;
-  refresh_token?: string;
-  expires_in: number;
-  scope?: string;
+export function parseTokenResponse(
+  raw: unknown,
+  defaultScope: string,
+  fallbackRefreshToken = '',
+): OAuthCredentials {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('Invalid OAuth token response: payload is not an object');
+  }
+
+  const obj = raw as Record<string, unknown>;
+
+  // Withings API status: 0 is success, non-zero is an error
+  if (typeof obj.status === 'number' && obj.status !== 0) {
+    const errorMsg = typeof obj.error === 'string'
+      ? obj.error
+      : (typeof obj.message === 'string' ? obj.message : `API status code ${obj.status}`);
+    throw new Error(`OAuth provider returned error: ${errorMsg}`);
+  }
+
+  // Support nested body (Withings API format: { status: 0, body: { access_token, ... } })
+  const payload = (obj.body && typeof obj.body === 'object')
+    ? (obj.body as Record<string, unknown>)
+    : obj;
+
+  const accessToken = typeof payload.access_token === 'string' ? payload.access_token : '';
+  if (!accessToken) {
+    throw new Error('OAuth token response missing access_token');
+  }
+
+  const refreshToken = typeof payload.refresh_token === 'string'
+    ? payload.refresh_token
+    : fallbackRefreshToken;
+
+  const expiresInRaw = typeof payload.expires_in === 'number' ? payload.expires_in : Number(payload.expires_in);
+  const expiresInSec = Number.isFinite(expiresInRaw) && expiresInRaw > 0 ? expiresInRaw : 3600;
+
+  const scope = typeof payload.scope === 'string' ? payload.scope : defaultScope;
+
+  return {
+    accessToken,
+    refreshToken,
+    expiresAt: new Date(Date.now() + expiresInSec * 1000).toISOString(),
+    scope,
+  };
 }
 
 export async function exchangeCodeForToken(
@@ -44,13 +83,8 @@ export async function exchangeCodeForToken(
     throw new Error(`OAuth token exchange failed for ${provider.kind}: ${res.status}`);
   }
 
-  const data = await res.json() as TokenResponse;
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token ?? '',
-    expiresAt: new Date(Date.now() + data.expires_in * 1000).toISOString(),
-    scope: data.scope ?? provider.scope,
-  };
+  const data = await res.json();
+  return parseTokenResponse(data, provider.scope);
 }
 
 async function refreshToken(provider: OAuthProvider, credentials: OAuthCredentials): Promise<OAuthCredentials> {
@@ -69,13 +103,8 @@ async function refreshToken(provider: OAuthProvider, credentials: OAuthCredentia
     throw new Error(`OAuth token refresh failed for ${provider.kind}: ${res.status}`);
   }
 
-  const data = await res.json() as TokenResponse;
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token ?? credentials.refreshToken,
-    expiresAt: new Date(Date.now() + data.expires_in * 1000).toISOString(),
-    scope: data.scope ?? credentials.scope,
-  };
+  const data = await res.json();
+  return parseTokenResponse(data, credentials.scope, credentials.refreshToken);
 }
 
 export class OAuthTokenError extends Error {
