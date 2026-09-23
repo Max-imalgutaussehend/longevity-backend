@@ -2134,6 +2134,45 @@ const start = async () => {
     return reply.status(200).send({ ok: true });
   });
 
+  app.post('/api/admin/insurer-requests/:id/resend-invite', async (req, reply) => {
+    const admin = await requireRole(req, reply, ['platform_admin']);
+    if (!admin) return;
+
+    const { id } = req.params as { id: string };
+    const [request] = await db.select().from(insurerRequests).where(eq(insurerRequests.id, id)).limit(1);
+    if (!request) return reply.status(404).send({ title: 'Anfrage nicht gefunden.' });
+    if (request.status !== 'approved') return reply.status(400).send({ title: 'Nur angenommene Anfragen können erneut eingeladen werden.' });
+
+    const [insurerUser] = await db.select().from(users).where(eq(users.email, request.contactEmail)).limit(1);
+    if (!insurerUser) return reply.status(404).send({ title: 'Zugehöriger Nutzer nicht gefunden.' });
+
+    const token = await issueEmailToken(insurerUser.id, 'insurer_invite', 7 * 24 * 60 * 60 * 1000);
+    const baseUrl = env.PUBLIC_BASE_URL ?? 'http://localhost:5173';
+    const inviteUrl = `${baseUrl}/insurer-invite/${token}`;
+    try {
+      await sendMail({ to: request.contactEmail, ...insurerInviteTemplate(request.company, inviteUrl) });
+    } catch (err) {
+      req.log.error(err, 'Einladungs-E-Mail (Resend) für Krankenkasse konnte nicht gesendet werden');
+      return reply.status(502).send({ title: 'E-Mail konnte nicht gesendet werden. Bitte SMTP-Konfiguration prüfen.' });
+    }
+
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.delete('/api/admin/insurer-requests/:id', async (req, reply) => {
+    const admin = await requireRole(req, reply, ['platform_admin']);
+    if (!admin) return;
+
+    const { id } = req.params as { id: string };
+    const [request] = await db.select({ id: insurerRequests.id, status: insurerRequests.status }).from(insurerRequests).where(eq(insurerRequests.id, id)).limit(1);
+    if (!request) return reply.status(404).send({ title: 'Anfrage nicht gefunden.' });
+    if (request.status === 'pending') return reply.status(400).send({ title: 'Offene Anfragen können nicht gelöscht werden.' });
+
+    await db.delete(insurerRequests).where(eq(insurerRequests.id, id));
+
+    return reply.status(204).send();
+  });
+
   try {
     await app.listen({ port: 3000, host: '0.0.0.0' });
   } catch (err) {
