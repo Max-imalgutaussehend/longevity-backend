@@ -2109,7 +2109,11 @@ const start = async () => {
 
     const baseUrl = env.PUBLIC_BASE_URL ?? 'http://localhost:5173';
     const inviteUrl = `${baseUrl}/insurer-invite/${token}`;
-    await sendMail({ to: request.contactEmail, ...insurerInviteTemplate(request.company, inviteUrl) });
+    try {
+      await sendMail({ to: request.contactEmail, ...insurerInviteTemplate(request.company, inviteUrl) });
+    } catch (err) {
+      req.log.error(err, 'Einladungs-E-Mail für Krankenkasse konnte nicht gesendet werden');
+    }
 
     return reply.status(200).send({ ok: true, organizationId: org.id });
   });
