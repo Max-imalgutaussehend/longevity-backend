@@ -25,7 +25,7 @@ interface HaeMetric {
   data: HaeDataPoint[];
 }
 
-type HaePayload = (HaeMetric[] | { metrics: HaeMetric[] }) & { workouts?: HaeWorkout[] };
+export type HaePayload = (HaeMetric[] | { metrics: HaeMetric[] }) & { workouts?: HaeWorkout[] };
 
 const STRENGTH_WORKOUT_NAMES = new Set(['Functional Strength Training', 'Traditional Strength Training', 'Cross Training']);
 
@@ -170,8 +170,10 @@ function parseStrengthSessions(workouts: HaeWorkout[]): Sample[] {
 }
 
 export function parseHealthAutoExport(payload: HaePayload, options?: HealthAutoExportOptions): Sample[] {
-  const metrics: HaeMetric[] = Array.isArray(payload) ? payload : (payload.metrics ?? []);
-  const workouts = payload.workouts ?? [];
+  const obj = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {};
+  const dataObj = typeof obj.data === 'object' && obj.data !== null ? (obj.data as Record<string, unknown>) : undefined;
+  const metrics: HaeMetric[] = Array.isArray(payload) ? payload : ((obj.metrics ?? dataObj?.metrics ?? []) as HaeMetric[]);
+  const workouts: HaeWorkout[] = (obj.workouts ?? dataObj?.workouts ?? []) as HaeWorkout[];
   const samples: Sample[] = [];
 
   for (const metric of metrics) {
