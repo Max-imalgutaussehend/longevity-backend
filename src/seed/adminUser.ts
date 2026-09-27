@@ -1,7 +1,7 @@
 import { db } from '../db/client.js';
 import { users } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
-import { hash } from '@node-rs/argon2';
+import { hashPassword } from '../lib/password.js';
 
 const ADMIN_EMAIL = 'admin@longevity.app';
 const ADMIN_PASSWORD = 'admin-longevity-2026';
@@ -15,7 +15,7 @@ async function run() {
     process.exit(0);
   }
 
-  const passwordHash = await hash(ADMIN_PASSWORD);
+  const passwordHash = await hashPassword(ADMIN_PASSWORD);
   await db.insert(users).values({
     email: ADMIN_EMAIL,
     passwordHash,

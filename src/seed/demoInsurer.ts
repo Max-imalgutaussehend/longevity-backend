@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { hash } from '@node-rs/argon2';
+import { hashPassword } from '../lib/password.js';
 import { db } from '../db/client.js';
 import { organizations, users, partnerOffers, insurerRequests } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
@@ -25,7 +25,7 @@ async function run() {
       joinCode: randomBytes(6).toString('hex'),
     }).returning();
 
-    const passwordHash = await hash(INSURER_PASSWORD);
+    const passwordHash = await hashPassword(INSURER_PASSWORD);
     const [user] = await tx.insert(users).values({
       email: INSURER_EMAIL,
       passwordHash,

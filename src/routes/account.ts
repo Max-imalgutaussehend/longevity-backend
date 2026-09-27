@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { eq, desc, and, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { verify as argon2Verify } from '@node-rs/argon2';
+import { verifyPassword } from '../lib/password.js';
 import { db } from '../db/client.js';
 import {
   users,
@@ -212,7 +212,7 @@ export async function accountRoutes(app: FastifyInstance) {
       return reply.status(400).send({ title: 'Passwort erforderlich.' });
     }
 
-    const ok = await argon2Verify(user.passwordHash, body.password);
+    const ok = await verifyPassword(user.passwordHash, body.password);
     if (!ok) return reply.status(401).send({ title: 'Falsches Passwort.' });
 
     await req.session.destroy();

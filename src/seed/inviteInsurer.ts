@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { hash } from '@node-rs/argon2';
+import { hashPassword } from '../lib/password.js';
 import { db } from '../db/client.js';
 import { organizations, users, emailTokens } from '../db/schema.js';
 import { sendMail } from '../lib/mail.js';
@@ -23,7 +23,7 @@ async function main() {
       joinCode: randomBytes(6).toString('hex'),
     }).returning();
 
-    const unusablePasswordHash = await hash(randomBytes(32).toString('base64url'));
+    const unusablePasswordHash = await hashPassword(randomBytes(32).toString('base64url'));
     const [user] = await tx.insert(users).values({
       email: contactEmail,
       passwordHash: unusablePasswordHash,
