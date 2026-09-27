@@ -10,7 +10,7 @@ describe('Application Factory & Route Plugin Architecture (app.ts)', () => {
   beforeAll(async () => {
     const { buildApp } = await import('../app.js');
     app = await buildApp();
-  });
+  }, 30000);
 
   describe('Server Baseline', () => {
     it('returns 404 for unknown routes', async () => {

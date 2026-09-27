@@ -138,7 +138,7 @@ export function computeScore(input: ScoreInput): ScoreResult {
   });
 
   const chronoAge = age;
-  const bioAge = clamp(chronoAge - (finalScore - 50) / 10, chronoAge - 15, chronoAge + 15);
+  const bioAge = clamp(chronoAge - (finalScore - 50) / 3.33, chronoAge - 15, chronoAge + 15);
   const bandLow = Math.min(90, Math.floor(finalScore / 10) * 10);
   const band = { low: bandLow, high: bandLow === 90 ? 100 : bandLow + 9 };
 
