@@ -11,7 +11,7 @@ import { users, sources, samples, shareTokens, partnerOffers, scoreSnapshots, or
 import type { Role } from './db/schema.js';
 import { eq, desc, and, gte, asc, sql, inArray } from 'drizzle-orm';
 import { hash, verify as argon2Verify } from '@node-rs/argon2';
-import { computeScore, simulate, suggestLevers } from './score/index.js';
+import { computeScore, simulate, suggestLevers, evaluateHoldingPeriod } from './score/index.js';
 import { METRICS } from './score/metrics.js';
 import { generate } from './mock/generate.js';
 import { isWeakPassword } from './lib/weakPasswords.js';
@@ -1893,6 +1893,8 @@ const start = async () => {
     const userId = req.session.userId;
 
     let band = { low: 0, high: 100 };
+    let snapshots: { computedFor: string | Date; score: number }[] = [];
+
     if (userId) {
       const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
       if (user) {
@@ -1902,17 +1904,43 @@ const start = async () => {
           samples: userSamples, now,
         });
         band = score.band;
+
+        const dbSnapshots = await db.select({
+          computedFor: scoreSnapshots.computedFor,
+          score: scoreSnapshots.score,
+        }).from(scoreSnapshots)
+          .where(eq(scoreSnapshots.userId, userId))
+          .orderBy(asc(scoreSnapshots.computedFor));
+
+        snapshots = [...dbSnapshots];
+        const todayStr = now.toISOString().slice(0, 10);
+        if (!snapshots.some(s => s.computedFor === todayStr)) {
+          snapshots.push({ computedFor: todayStr, score: score.score });
+        }
       }
     }
 
     return rows
       .filter(o => (!o.validFrom || o.validFrom <= now) && (!o.validUntil || o.validUntil >= now))
-      .map(o => ({
-        id: o.id, partnerName: o.partnerName, title: o.title,
-        description: o.description, minBand: o.minBand,
-        valueLabel: o.valueLabel, isDemo: o.isDemo,
-        qualified: band.low >= o.minBand,
-      }));
+      .map(o => {
+        const evaluation = evaluateHoldingPeriod({
+          currentBand: band,
+          minBand: o.minBand,
+          minMonths: o.minMonths,
+          snapshots,
+          now,
+        });
+
+        return {
+          id: o.id, partnerName: o.partnerName, title: o.title,
+          description: o.description, minBand: o.minBand,
+          minMonths: o.minMonths ?? null,
+          valueLabel: o.valueLabel, isDemo: o.isDemo,
+          qualified: userId ? evaluation.qualified : false,
+          daysHeld: userId ? evaluation.daysHeld : 0,
+          daysRemaining: userId ? evaluation.daysRemaining : evaluation.requiredDays,
+        };
+      });
   };
 
   app.get('/api/partner-offers', partnerOffersHandler);
@@ -1931,6 +1959,7 @@ const start = async () => {
 
     return rows.map(o => ({
       id: o.id, title: o.title, description: o.description, minBand: o.minBand,
+      minMonths: o.minMonths ?? null,
       valueLabel: o.valueLabel,
       validFrom: o.validFrom?.toISOString() ?? null,
       validUntil: o.validUntil?.toISOString() ?? null,
@@ -1942,8 +1971,16 @@ const start = async () => {
     if (!user) return;
     if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
 
-    const body = req.body as { title?: string; description?: string; minBand?: number; valueLabel?: string; validFrom?: string; validUntil?: string };
-    const { title, description, minBand, valueLabel, validFrom, validUntil } = body;
+    const body = req.body as {
+      title?: string;
+      description?: string;
+      minBand?: number;
+      minMonths?: number | null;
+      valueLabel?: string;
+      validFrom?: string;
+      validUntil?: string;
+    };
+    const { title, description, minBand, minMonths, valueLabel, validFrom, validUntil } = body;
 
     if (!title || !description || minBand === undefined || !valueLabel) {
       return reply.status(400).send({ title: 'Pflichtfelder fehlen.' });
@@ -1951,13 +1988,18 @@ const start = async () => {
     if (minBand < 0 || minBand > 100) {
       return reply.status(400).send({ title: 'Mindest-Score-Band muss zwischen 0 und 100 liegen.' });
     }
+    if (minMonths !== undefined && minMonths !== null && (typeof minMonths !== 'number' || !Number.isInteger(minMonths) || minMonths < 0 || minMonths > 36)) {
+      return reply.status(400).send({ title: 'Mindesthaltedauer muss zwischen 0 und 36 Monaten liegen.' });
+    }
 
     const [org] = await db.select().from(organizations).where(eq(organizations.id, user.organizationId)).limit(1);
 
     const [offer] = await db.insert(partnerOffers).values({
       organizationId: user.organizationId,
       partnerName: org?.name ?? 'Krankenkasse',
-      title, description, minBand, valueLabel,
+      title, description, minBand,
+      minMonths: minMonths ?? null,
+      valueLabel,
       validFrom: validFrom ? new Date(validFrom) : null,
       validUntil: validUntil ? new Date(validUntil) : null,
       isDemo: false,
@@ -1965,6 +2007,7 @@ const start = async () => {
 
     return reply.status(201).send({
       id: offer.id, title: offer.title, description: offer.description, minBand: offer.minBand,
+      minMonths: offer.minMonths ?? null,
       valueLabel: offer.valueLabel,
       validFrom: offer.validFrom?.toISOString() ?? null,
       validUntil: offer.validUntil?.toISOString() ?? null,
@@ -1977,10 +2020,21 @@ const start = async () => {
     if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
 
     const { id } = req.params as { id: string };
-    const body = req.body as { title?: string; description?: string; minBand?: number; valueLabel?: string; validFrom?: string | null; validUntil?: string | null };
+    const body = req.body as {
+      title?: string;
+      description?: string;
+      minBand?: number;
+      minMonths?: number | null;
+      valueLabel?: string;
+      validFrom?: string | null;
+      validUntil?: string | null;
+    };
 
     if (body.minBand !== undefined && (body.minBand < 0 || body.minBand > 100)) {
       return reply.status(400).send({ title: 'Mindest-Score-Band muss zwischen 0 und 100 liegen.' });
+    }
+    if (body.minMonths !== undefined && body.minMonths !== null && (typeof body.minMonths !== 'number' || !Number.isInteger(body.minMonths) || body.minMonths < 0 || body.minMonths > 36)) {
+      return reply.status(400).send({ title: 'Mindesthaltedauer muss zwischen 0 und 36 Monaten liegen.' });
     }
 
     const [existing] = await db.select().from(partnerOffers)
@@ -1992,6 +2046,7 @@ const start = async () => {
       ...(body.title !== undefined && { title: body.title }),
       ...(body.description !== undefined && { description: body.description }),
       ...(body.minBand !== undefined && { minBand: body.minBand }),
+      ...(body.minMonths !== undefined && { minMonths: body.minMonths ?? null }),
       ...(body.valueLabel !== undefined && { valueLabel: body.valueLabel }),
       ...(body.validFrom !== undefined && { validFrom: body.validFrom ? new Date(body.validFrom) : null }),
       ...(body.validUntil !== undefined && { validUntil: body.validUntil ? new Date(body.validUntil) : null }),
@@ -1999,6 +2054,7 @@ const start = async () => {
 
     return {
       id: updated.id, title: updated.title, description: updated.description, minBand: updated.minBand,
+      minMonths: updated.minMonths ?? null,
       valueLabel: updated.valueLabel,
       validFrom: updated.validFrom?.toISOString() ?? null,
       validUntil: updated.validUntil?.toISOString() ?? null,

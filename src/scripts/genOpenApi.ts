@@ -113,6 +113,7 @@ paths['/insurer/offers'] = {
       type: 'object', required: ['title', 'description', 'minBand', 'valueLabel'],
       properties: {
         title: { type: 'string' }, description: { type: 'string' }, minBand: { type: 'integer', minimum: 0, maximum: 100 },
+        minMonths: { type: 'integer', minimum: 0, maximum: 36, nullable: true },
         valueLabel: { type: 'string' }, validFrom: { type: 'string', format: 'date-time' }, validUntil: { type: 'string', format: 'date-time' },
       },
     } } } },
@@ -126,6 +127,7 @@ paths['/insurer/offers/{id}'] = {
       type: 'object',
       properties: {
         title: { type: 'string' }, description: { type: 'string' }, minBand: { type: 'integer', minimum: 0, maximum: 100 },
+        minMonths: { type: 'integer', minimum: 0, maximum: 36, nullable: true },
         valueLabel: { type: 'string' }, validFrom: { type: 'string', format: 'date-time', nullable: true }, validUntil: { type: 'string', format: 'date-time', nullable: true },
       },
     } } } },
@@ -438,8 +440,11 @@ const schemas: Record<string, unknown> = {
     required: ['id', 'partnerName', 'title', 'description', 'minBand', 'valueLabel', 'isDemo', 'qualified'],
     properties: {
       id: { type: 'string', format: 'uuid' }, partnerName: { type: 'string' }, title: { type: 'string' },
-      description: { type: 'string' }, minBand: { type: 'integer' }, valueLabel: { type: 'string' },
+      description: { type: 'string' }, minBand: { type: 'integer' },
+      minMonths: { type: ['integer', 'null'] },
+      valueLabel: { type: 'string' },
       isDemo: { type: 'boolean' }, qualified: { type: 'boolean' },
+      daysHeld: { type: 'integer' }, daysRemaining: { type: 'integer' },
     },
   },
   User: {

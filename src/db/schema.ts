@@ -113,6 +113,7 @@ export const partnerOffers = pgTable('partner_offers', {
   title: text('title').notNull(),
   description: text('description').notNull(),
   minBand: integer('min_band').notNull(),
+  minMonths: integer('min_months'),
   valueLabel: text('value_label').notNull(),
   validFrom: timestamp('valid_from', { withTimezone: true }),
   validUntil: timestamp('valid_until', { withTimezone: true }),
