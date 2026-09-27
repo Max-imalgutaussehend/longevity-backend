@@ -1,6 +1,6 @@
 {
-  "id": "e2d204bf-22ba-4d6a-829f-fcb3e7732b85",
-  "prevId": "d81d767d-41ab-4c51-803e-5575d7224d55",
+  "id": "ea226556-63a8-4400-a261-76a05d38dd65",
+  "prevId": "e2d204bf-22ba-4d6a-829f-fcb3e7732b85",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -390,6 +390,12 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "min_months": {
+          "name": "min_months",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "value_label": {
           "name": "value_label",

@@ -1,9 +1,9 @@
 import { clamp, Phi } from './stats.js';
 import { METRICS, DOMAIN_WEIGHTS } from './metrics.js';
 import { REFERENCE, SMOKING_Z } from './reference.js';
-import type { ScoreInput, ScoreResult, MetricResult, DomainResult, Lever, Metric, Domain } from './types.js';
+import type { ScoreInput, ScoreResult, MetricResult, DomainResult, Lever, Metric, Domain, SourceKind } from './types.js';
 
-const ENGINE_VERSION = '0.1.0';
+const ENGINE_VERSION = '0.2.0';
 
 function ageYears(birthDate: string, now: Date): number {
   const birth = new Date(birthDate);
@@ -24,6 +24,12 @@ function computeZ(metric: string, value: number, age: number, sex: 'm' | 'f'): n
   const ref = REFERENCE[metric];
   if (!ref) return 0;
 
+  // Pathologische Untergrenzen für lower-Metriken (z. B. Ruhepuls < 40 bpm, systol. Blutdruck < 90 mmHg, Taillenumfang < 60 cm)
+  // Extreme Tiefwerte sind medizinisch gefährlich und werden mit Minimal-Score (z = -3) abgestraft statt Bestnoten zu erhalten.
+  if (ref.pathologicalMin !== undefined && value < ref.pathologicalMin) {
+    return -3;
+  }
+
   const mu = ref.mu(age, sex);
   const sigma = ref.sigma(sex);
   const def = METRICS.find(m => m.metric === metric);
@@ -43,7 +49,7 @@ export function computeScore(input: ScoreInput): ScoreResult {
   const age = ageYears(profile.birthDate, now);
 
   // Filter and get most recent valid sample per metric with freshness
-  const latestSamples = new Map<string, { value: number; measuredAt: string; sourceKind: string }>();
+  const latestSamples = new Map<string, { value: number; measuredAt: string; sourceKind: SourceKind }>();
   for (const s of samples) {
     if (typeof s.value !== 'number' || !Number.isFinite(s.value) || isNaN(s.value) || s.value < 0) {
       continue;
@@ -138,7 +144,7 @@ export function computeScore(input: ScoreInput): ScoreResult {
   });
 
   const chronoAge = age;
-  const bioAge = clamp(chronoAge - (finalScore - 50) / 10, chronoAge - 15, chronoAge + 15);
+  const bioAge = clamp(chronoAge - (finalScore - 50) / 3.33, chronoAge - 15, chronoAge + 15);
   const bandLow = Math.min(90, Math.floor(finalScore / 10) * 10);
   const band = { low: bandLow, high: bandLow === 90 ? 100 : bandLow + 9 };
 
@@ -183,42 +189,96 @@ export function simulate(
 export function suggestLevers(input: ScoreInput): Lever[] {
   const base = computeScore(input);
   const now = input.now instanceof Date ? input.now : new Date(input.now);
+  const age = ageYears(input.profile.birthDate, now);
+
+  // Filter and get most recent valid sample per metric with freshness >= 0.05 (identical to computeScore)
+  const latestSamples = new Map<string, { value: number; measuredAt: string; sourceKind: SourceKind }>();
+  for (const s of input.samples) {
+    if (typeof s.value !== 'number' || !Number.isFinite(s.value) || isNaN(s.value) || s.value < 0) {
+      continue;
+    }
+    const sampleDate = new Date(s.measuredAt);
+    if (isNaN(sampleDate.getTime())) {
+      continue;
+    }
+    const existing = latestSamples.get(s.metric);
+    if (!existing || sampleDate > new Date(existing.measuredAt)) {
+      latestSamples.set(s.metric, { value: s.value, measuredAt: s.measuredAt, sourceKind: s.sourceKind });
+    }
+  }
 
   return METRICS
     .map(def => {
-      const sample = input.samples.find(s => s.metric === def.metric);
-      const currentValue = sample?.value ?? null;
+      const sample = latestSamples.get(def.metric);
+      if (!sample) return null;
 
-      // A lever without any real measurement isn't a recommendation — it's a
-      // cohort-mean guess. Only 'smoking' has a deliberate no-data default
-      // (assume current smoker) since that default is itself informative.
-      if (currentValue === null && def.metric !== 'smoking') return null;
+      const freshness = computeFreshness(sample.measuredAt, now, def.halfLifeDays);
+      if (freshness < 0.05) return null;
 
+      const currentValue = sample.value;
       let targetValue: number;
+      let horizonWeeks = 8;
+
       if (def.metric === 'smoking') {
-        const current = currentValue ?? 3; // default to current smoker
-        targetValue = Math.max(0, current - 1);
+        // 0 = never, 1 = former_gt_1y, 2 = former_lt_1y, 3 = current
+        // Bereits Nichtraucher (never oder former_gt_1y): kein Hebel
+        if (currentValue <= 1) {
+          return null;
+        } else if (currentValue === 3) {
+          // Aktiver Raucher -> Rauchstopp anstreben (ehemalig < 1 Jahr)
+          targetValue = 2;
+          horizonWeeks = 12;
+        } else if (currentValue === 2) {
+          // Ehemalig < 1 Jahr -> Rauchfreiheit über 1 Jahr halten
+          targetValue = 1;
+          horizonWeeks = 52;
+        } else {
+          return null;
+        }
       } else {
-        // currentValue is guaranteed non-null here by the guard above.
         const ref = REFERENCE[def.metric];
         if (!ref) return null;
+
+        // Pathologisch zu niedrige Werte nicht noch weiter absenken
+        if (ref.pathologicalMin !== undefined && currentValue < ref.pathologicalMin) {
+          return null;
+        }
+
         const sigma = ref.sigma(input.profile.sex);
-        const improvement = def.dir === 'higher' ? 0.5 * sigma : -0.5 * sigma;
-        targetValue = (currentValue as number) + improvement;
+        const mu = ref.mu(age, input.profile.sex);
+        const target = ref.target ?? mu;
+
+        if (def.dir === 'target') {
+          // Verbesserung um 0,5 sigma gezielt in Richtung des Zielwerts
+          if (currentValue < target) {
+            targetValue = Math.min(target, currentValue + 0.5 * sigma);
+          } else if (currentValue > target) {
+            targetValue = Math.max(target, currentValue - 0.5 * sigma);
+          } else {
+            return null;
+          }
+        } else if (def.dir === 'higher') {
+          targetValue = currentValue + 0.5 * sigma;
+        } else {
+          // lower
+          targetValue = Math.max(0, currentValue - 0.5 * sigma);
+        }
       }
 
       const sim = computeScore({
         ...input,
         samples: [
           ...input.samples.filter(s => s.metric !== def.metric),
-          { metric: def.metric, value: targetValue, unit: def.unit, measuredAt: now.toISOString(), sourceKind: 'apple_health' },
+          { metric: def.metric, value: targetValue, unit: def.unit, measuredAt: now.toISOString(), sourceKind: sample.sourceKind },
         ],
       });
 
       return {
-        metric: def.metric, currentValue, targetValue,
+        metric: def.metric,
+        currentValue,
+        targetValue: Math.round(targetValue * 10) / 10,
         delta: Math.round((sim.score - base.score) * 10) / 10,
-        horizonWeeks: 8,
+        horizonWeeks,
       } as Lever;
     })
     .filter((l): l is Lever => l !== null && l.delta > 0)

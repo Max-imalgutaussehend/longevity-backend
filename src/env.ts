@@ -7,6 +7,7 @@ const optionalPort = z.string().transform(v => (v.trim() === '' ? undefined : v)
 const schema = z.object({
   DATABASE_URL: z.string().min(1),
   SESSION_SECRET: z.string().min(32),
+  PASSWORD_PEPPER: z.string().min(16).default('longevity-default-pepper-secret-32b-long!'),
   SIGNING_KEY_PRIVATE: optionalString,
   SIGNING_KEY_PUBLIC: optionalString,
   PUBLIC_BASE_URL: optionalUrl,
@@ -37,6 +38,17 @@ if (!parsed.success) {
   console.error('Invalid environment variables:');
   console.error(parsed.error.flatten().fieldErrors);
   process.exit(1);
+}
+
+if (parsed.data.NODE_ENV === 'production') {
+  const missing: string[] = [];
+  if (!parsed.data.SIGNING_KEY_PRIVATE) missing.push('SIGNING_KEY_PRIVATE');
+  if (!parsed.data.SIGNING_KEY_PUBLIC) missing.push('SIGNING_KEY_PUBLIC');
+
+  if (missing.length > 0) {
+    console.error(`Production startup error: Missing required signing keys: ${missing.join(', ')}`);
+    process.exit(1);
+  }
 }
 
 export const env = parsed.data;

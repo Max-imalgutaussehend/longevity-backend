@@ -2277,6 +2277,71 @@
         }
       }
     },
+    "/verify/public-key": {
+      "get": {
+        "operationId": "getVerificationPublicKey",
+        "tags": [
+          "Share"
+        ],
+        "security": [],
+        "summary": "Public: get Ed25519 public key for offline token verification",
+        "responses": {
+          "200": {
+            "description": "Ed25519 public key in SPKI-PEM and JWK format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "algorithm",
+                    "format",
+                    "publicKey",
+                    "jwk"
+                  ],
+                  "properties": {
+                    "algorithm": {
+                      "type": "string",
+                      "example": "Ed25519"
+                    },
+                    "format": {
+                      "type": "string",
+                      "example": "spki-pem"
+                    },
+                    "publicKey": {
+                      "type": "string"
+                    },
+                    "jwk": {
+                      "type": "object",
+                      "required": [
+                        "kty",
+                        "crv",
+                        "x"
+                      ],
+                      "properties": {
+                        "kty": {
+                          "type": "string",
+                          "example": "OKP"
+                        },
+                        "crv": {
+                          "type": "string",
+                          "example": "Ed25519"
+                        },
+                        "x": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Public key not configured"
+          }
+        }
+      }
+    },
     "/verify/{id}": {
       "get": {
         "operationId": "verifyToken",

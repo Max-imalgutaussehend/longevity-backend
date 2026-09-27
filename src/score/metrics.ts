@@ -39,7 +39,7 @@ export const METRICS: MetricDef[] = [
   { metric: 'hba1c', domain: 'cardiometabolic', unit: '%', dir: 'lower', weight: 0.12, halfLifeDays: 180 },
   { metric: 'waist', domain: 'cardiometabolic', unit: 'cm', dir: 'lower', weight: 0.06, halfLifeDays: 365 },
   // recovery
-  { metric: 'sleep_duration', domain: 'recovery', unit: 'h', dir: 'higher', weight: 0.34, halfLifeDays: 14 },
+  { metric: 'sleep_duration', domain: 'recovery', unit: 'h', dir: 'target', weight: 0.34, halfLifeDays: 14 },
   { metric: 'sleep_consistency', domain: 'recovery', unit: 'min', dir: 'lower', weight: 0.33, halfLifeDays: 14 },
   { metric: 'hrv_rmssd', domain: 'recovery', unit: 'ms', dir: 'higher', weight: 0.33, halfLifeDays: 14 },
   // activity
