@@ -3,7 +3,7 @@ import { METRICS, DOMAIN_WEIGHTS } from './metrics.js';
 import { REFERENCE, SMOKING_Z } from './reference.js';
 import type { ScoreInput, ScoreResult, MetricResult, DomainResult, Lever, Metric, Domain, SourceKind } from './types.js';
 
-const ENGINE_VERSION = '0.1.0';
+const ENGINE_VERSION = '0.2.0';
 
 function ageYears(birthDate: string, now: Date): number {
   const birth = new Date(birthDate);
@@ -23,6 +23,12 @@ function computeZ(metric: string, value: number, age: number, sex: 'm' | 'f'): n
 
   const ref = REFERENCE[metric];
   if (!ref) return 0;
+
+  // Pathologische Untergrenzen für lower-Metriken (z. B. Ruhepuls < 40 bpm, systol. Blutdruck < 90 mmHg, Taillenumfang < 60 cm)
+  // Extreme Tiefwerte sind medizinisch gefährlich und werden mit Minimal-Score (z = -3) abgestraft statt Bestnoten zu erhalten.
+  if (ref.pathologicalMin !== undefined && value < ref.pathologicalMin) {
+    return -3;
+  }
 
   const mu = ref.mu(age, sex);
   const sigma = ref.sigma(sex);
@@ -232,6 +238,12 @@ export function suggestLevers(input: ScoreInput): Lever[] {
       } else {
         const ref = REFERENCE[def.metric];
         if (!ref) return null;
+
+        // Pathologisch zu niedrige Werte nicht noch weiter absenken
+        if (ref.pathologicalMin !== undefined && currentValue < ref.pathologicalMin) {
+          return null;
+        }
+
         const sigma = ref.sigma(input.profile.sex);
         const mu = ref.mu(age, input.profile.sex);
         const target = ref.target ?? mu;

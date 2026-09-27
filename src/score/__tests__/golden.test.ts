@@ -29,9 +29,9 @@ describe('Golden Tests', () => {
     expect(result.coverage).toBeLessThanOrEqual(0.84);
   });
 
-  it('perfect — all metrics at μ+2σ → score > 92', () => {
+  it('perfect — all metrics at optimal (μ+2σ / target) → score >= 90', () => {
     const result = computeScore(toInput(perfectFixture));
-    expect(result.score).toBeGreaterThan(92);
+    expect(result.score).toBeGreaterThanOrEqual(90);
   });
 
   it('stale — 400-day-old samples → coverage < 0.1, score near 50', () => {
@@ -59,6 +59,58 @@ describe('Golden Tests', () => {
       const result = computeScore({ ...input, samples: modifiedSamples });
       expect(result.score, `${metric} increased should not lower score`).toBeGreaterThanOrEqual(base.score - 0.01);
     }
+  });
+
+  it('target metric monotony — sleep_duration increases towards target (7.5h) and decreases away from it', () => {
+    const input = toInput(demoFixture) as ScoreInput;
+
+    const s5 = computeScore({ ...input, samples: input.samples.map(s => s.metric === 'sleep_duration' ? { ...s, value: 5.0 } : s) });
+    const s6 = computeScore({ ...input, samples: input.samples.map(s => s.metric === 'sleep_duration' ? { ...s, value: 6.0 } : s) });
+    const s7 = computeScore({ ...input, samples: input.samples.map(s => s.metric === 'sleep_duration' ? { ...s, value: 7.0 } : s) });
+    const s75 = computeScore({ ...input, samples: input.samples.map(s => s.metric === 'sleep_duration' ? { ...s, value: 7.5 } : s) });
+
+    expect(s6.score).toBeGreaterThanOrEqual(s5.score);
+    expect(s7.score).toBeGreaterThanOrEqual(s6.score);
+    expect(s75.score).toBeGreaterThanOrEqual(s7.score);
+
+    const s9 = computeScore({ ...input, samples: input.samples.map(s => s.metric === 'sleep_duration' ? { ...s, value: 9.0 } : s) });
+    const s11 = computeScore({ ...input, samples: input.samples.map(s => s.metric === 'sleep_duration' ? { ...s, value: 11.0 } : s) });
+    const s14 = computeScore({ ...input, samples: input.samples.map(s => s.metric === 'sleep_duration' ? { ...s, value: 14.0 } : s) });
+
+    expect(s75.score).toBeGreaterThanOrEqual(s9.score);
+    expect(s9.score).toBeGreaterThanOrEqual(s11.score);
+    expect(s11.score).toBeGreaterThanOrEqual(s14.score);
+  });
+
+  it('penalizes pathological extreme values for resting_hr (< 40 bpm), systolic_bp (< 90 mmHg), and waist (< 60 cm)', () => {
+    const input = toInput(demoFixture) as ScoreInput;
+
+    // Resting HR < 40 bpm (pathological bradycardia) gets clamped to z = -3 instead of receiving best note
+    const bradycardia = computeScore({
+      ...input,
+      samples: input.samples.map(s => s.metric === 'resting_hr' ? { ...s, value: 28 } : s),
+    });
+    const rhrMetric = bradycardia.domains.flatMap(d => d.metrics).find(m => m.metric === 'resting_hr');
+    expect(rhrMetric?.z).toBe(-3);
+    expect(rhrMetric?.percentile).toBeLessThanOrEqual(1);
+
+    // Systolic BP < 90 mmHg (hypotension) gets clamped to z = -3
+    const hypotension = computeScore({
+      ...input,
+      samples: input.samples.map(s => s.metric === 'systolic_bp' ? { ...s, value: 65 } : s),
+    });
+    const bpMetric = hypotension.domains.flatMap(d => d.metrics).find(m => m.metric === 'systolic_bp');
+    expect(bpMetric?.z).toBe(-3);
+    expect(bpMetric?.percentile).toBeLessThanOrEqual(1);
+
+    // Waist < 60 cm (severe underweight / cachexia) gets clamped to z = -3
+    const cachexia = computeScore({
+      ...input,
+      samples: input.samples.map(s => s.metric === 'waist' ? { ...s, value: 40 } : s),
+    });
+    const waistMetric = cachexia.domains.flatMap(d => d.metrics).find(m => m.metric === 'waist');
+    expect(waistMetric?.z).toBe(-3);
+    expect(waistMetric?.percentile).toBeLessThanOrEqual(1);
   });
 
   it('determinism — same input produces same output twice', () => {
