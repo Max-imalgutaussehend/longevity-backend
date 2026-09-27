@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { eq, desc, and, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { verifyPassword } from '../lib/password.js';
 import { db } from '../db/client.js';
@@ -14,6 +14,7 @@ import {
   healthDataConsents,
 } from '../db/schema.js';
 import { CURRENT_HEALTH_DATA_CONSENT_VERSION, HEALTH_DATA_CONSENT_TEXT } from '../lib/consent.js';
+import { validateKvnr, hashKvnr } from '../lib/kvnr.js';
 import { requireUser, requireRole } from './helpers.js';
 import { setCsrfCookies } from '../lib/csrf.js';
 import '../types.js';
@@ -27,6 +28,23 @@ export async function accountRoutes(app: FastifyInstance) {
 
     const now = new Date();
     const chronoAge = (now.getTime() - new Date(user.birthDate).getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+
+    let organization: { id: string; name: string; verifiedAt: string | null } | null = null;
+    if (user.organizationId) {
+      const [org] = await db
+        .select({ id: organizations.id, name: organizations.name })
+        .from(organizations)
+        .where(eq(organizations.id, user.organizationId))
+        .limit(1);
+      if (org) {
+        organization = {
+          id: org.id,
+          name: org.name,
+          verifiedAt: user.organizationVerifiedAt?.toISOString() ?? null,
+        };
+      }
+    }
+
     return {
       id: user.id,
       email: user.email,
@@ -36,6 +54,8 @@ export async function accountRoutes(app: FastifyInstance) {
       chronoAge: Math.round(chronoAge * 10) / 10,
       role: user.role,
       organizationId: user.organizationId,
+      organization,
+      organizationVerifiedAt: user.organizationVerifiedAt?.toISOString() ?? null,
       emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
       healthDataConsentAt: user.healthDataConsentAt?.toISOString() ?? null,
       healthDataConsentVersion: user.healthDataConsentVersion ?? null,
@@ -43,26 +63,120 @@ export async function accountRoutes(app: FastifyInstance) {
     };
   });
 
+  app.get('/organizations/public-list', async () => {
+    const rows = await db
+      .select({ id: organizations.id, name: organizations.name })
+      .from(organizations)
+      .where(eq(organizations.status, 'active'))
+      .orderBy(organizations.name);
+    return rows;
+  });
+
   app.post('/organizations/join', async (req, reply) => {
     const user = await requireRole(req, reply, ['b2c']);
     if (!user) return;
 
-    const { joinCode } = req.body as { joinCode?: string };
-    if (!joinCode) return reply.status(400).send({ title: 'Beitrittscode erforderlich.' });
+    const { joinCode, organizationId, kvnr } = (req.body as {
+      joinCode?: string;
+      organizationId?: string;
+      kvnr?: string;
+    }) || {};
 
-    const [org] = await db.select().from(organizations).where(eq(organizations.joinCode, joinCode)).limit(1);
+    if (!joinCode && (!organizationId || !kvnr)) {
+      return reply.status(400).send({
+        title: 'Krankenkasse und Krankenversichertennummer (KVNR) oder Beitrittscode erforderlich.',
+      });
+    }
+
+    // Pfad A: KVNR-basierte Verifikation der Mitgliedschaft
+    if (organizationId && kvnr) {
+      const kvnrResult = validateKvnr(kvnr);
+      if (!kvnrResult.valid || !kvnrResult.normalized) {
+        return reply.status(400).send({
+          title: kvnrResult.error || 'Ungültige Krankenversichertennummer.',
+        });
+      }
+
+      const [org] = await db
+        .select()
+        .from(organizations)
+        .where(eq(organizations.id, organizationId))
+        .limit(1);
+
+      if (!org || org.status !== 'active') {
+        return reply.status(404).send({ title: 'Krankenkasse nicht gefunden oder nicht aktiv.' });
+      }
+
+      const hashed = hashKvnr(kvnrResult.normalized);
+
+      // Verhindert Mehrfachanmeldungen mit derselben KVNR
+      const existingWithHash = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.kvnrHash, hashed), ne(users.id, user.id)))
+        .limit(1);
+
+      if (existingWithHash.length > 0) {
+        return reply.status(409).send({
+          title: 'Diese Krankenversichertennummer ist bereits mit einem anderen Konto verknüpft.',
+        });
+      }
+
+      const now = new Date();
+      await db
+        .update(users)
+        .set({
+          organizationId: org.id,
+          organizationVerifiedAt: now,
+          kvnrHash: hashed,
+        })
+        .where(eq(users.id, user.id));
+
+      return reply.status(200).send({
+        ok: true,
+        organizationName: org.name,
+        verifiedAt: now.toISOString(),
+      });
+    }
+
+    // Pfad B: Abwärtskompatibler Beitrittscode
+    const [org] = await db
+      .select()
+      .from(organizations)
+      .where(eq(organizations.joinCode, joinCode!))
+      .limit(1);
+
     if (!org || org.status !== 'active') {
       return reply.status(404).send({ title: 'Ungültiger Beitrittscode.' });
     }
 
-    await db.update(users).set({ organizationId: org.id }).where(eq(users.id, user.id));
-    return reply.status(200).send({ ok: true, organizationName: org.name });
+    const now = new Date();
+    await db
+      .update(users)
+      .set({
+        organizationId: org.id,
+        organizationVerifiedAt: now,
+      })
+      .where(eq(users.id, user.id));
+
+    return reply.status(200).send({
+      ok: true,
+      organizationName: org.name,
+      verifiedAt: now.toISOString(),
+    });
   });
 
   app.post('/organizations/leave', async (req, reply) => {
     const user = await requireRole(req, reply, ['b2c']);
     if (!user) return;
-    await db.update(users).set({ organizationId: null }).where(eq(users.id, user.id));
+    await db
+      .update(users)
+      .set({
+        organizationId: null,
+        organizationVerifiedAt: null,
+        kvnrHash: null,
+      })
+      .where(eq(users.id, user.id));
     return reply.status(204).send();
   });
 

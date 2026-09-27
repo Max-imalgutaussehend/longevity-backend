@@ -1,6 +1,6 @@
 {
-  "id": "ee81cb55-6018-4eec-b2f4-162a7bbc2a90",
-  "prevId": "ea226556-63a8-4400-a261-76a05d38dd65",
+  "id": "0788bb41-a15a-429a-a7dd-e578303e106e",
+  "prevId": "ee81cb55-6018-4eec-b2f4-162a7bbc2a90",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1018,6 +1018,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "organization_verified_at": {
+          "name": "organization_verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kvnr_hash": {
+          "name": "kvnr_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "email_verified_at": {
           "name": "email_verified_at",
           "type": "timestamp with time zone",
@@ -1089,6 +1101,13 @@
           "nullsNotDistinct": false,
           "columns": [
             "email"
+          ]
+        },
+        "users_kvnr_hash_unique": {
+          "name": "users_kvnr_hash_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "kvnr_hash"
           ]
         },
         "users_webhook_secret_unique": {

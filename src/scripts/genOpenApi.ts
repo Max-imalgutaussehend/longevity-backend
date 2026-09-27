@@ -110,12 +110,52 @@ paths['/me'] = {
   get: { operationId: 'getMe', tags: ['User'], summary: 'Get current user', responses: { 200: { description: 'User object', content: { 'application/json': { schema: ref('User') } } }, ...auth401 } },
 };
 
+paths['/organizations/public-list'] = {
+  get: {
+    operationId: 'listPublicOrganizations',
+    tags: ['Insurer'],
+    security: publicSecurity,
+    summary: 'List active partner health insurers for public selection',
+    responses: {
+      200: {
+        description: 'Array of active organizations',
+        content: {
+          'application/json': {
+            schema: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['id', 'name'],
+                properties: {
+                  id: { type: 'string', format: 'uuid' },
+                  name: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
 paths['/organizations/join'] = {
-  post: { operationId: 'joinOrganization', tags: ['Insurer'], summary: 'Link the current b2c user to an organization via join code',
+  post: { operationId: 'joinOrganization', tags: ['Insurer'], summary: 'Link the current b2c user to an organization via KVNR verification or join code',
     requestBody: { required: true, content: { 'application/json': { schema: {
-      type: 'object', required: ['joinCode'], properties: { joinCode: { type: 'string' } },
+      type: 'object', properties: {
+        joinCode: { type: 'string' },
+        organizationId: { type: 'string', format: 'uuid' },
+        kvnr: { type: 'string' },
+      },
     } } } },
-    responses: { 200: { description: 'OK' }, 404: { description: 'Invalid join code' }, 403: { description: 'Not a b2c user' }, ...auth401 } },
+    responses: {
+      200: { description: 'OK', content: { 'application/json': { schema: { type: 'object', properties: { ok: { type: 'boolean' }, organizationName: { type: 'string' }, verifiedAt: { type: 'string', format: 'date-time' } } } } } },
+      400: { description: 'Invalid KVNR or missing parameters' },
+      404: { description: 'Organization or join code not found' },
+      409: { description: 'KVNR already linked to another account' },
+      403: { description: 'Not a b2c user' },
+      ...auth401,
+    } },
 };
 
 paths['/organizations/leave'] = {
@@ -550,6 +590,16 @@ const schemas: Record<string, unknown> = {
       birthDate: { type: 'string', format: 'date' },
       sex: { type: 'string', enum: ['m', 'f'] },
       chronoAge: { type: 'number' },
+      organizationId: { type: ['string', 'null'], format: 'uuid' },
+      organizationVerifiedAt: { type: ['string', 'null'], format: 'date-time' },
+      organization: {
+        type: ['object', 'null'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          name: { type: 'string' },
+          verifiedAt: { type: ['string', 'null'], format: 'date-time' },
+        },
+      },
     },
   },
   WeeklyReport: {
