@@ -56,13 +56,23 @@ export async function requireRole(req: FastifyRequest, reply: FastifyReply, role
   }
   return user;
 }
-
 export type SourceTrustLevel = 'mock' | 'unverified' | 'cloud_verified' | 'certified_medical';
 
-export function determineSourceTrustLevel(adapter: string, credentials: unknown): SourceTrustLevel {
+export const CLOUD_VERIFIED_ADAPTERS = new Set([
+  'withings',
+  'oura',
+  'strava',
+  'google-fit',
+  'google_fit',
+  'google-health',
+  'google_health',
+  'oauth',
+]);
+
+export function determineSourceTrustLevel(adapter: string, _credentials?: unknown): SourceTrustLevel {
   if (adapter === 'mock') return 'mock';
   if (adapter === 'fhir') return 'certified_medical';
-  if (['withings', 'oura', 'strava', 'google-fit', 'google-health'].includes(adapter) || (credentials !== null && credentials !== undefined)) {
+  if (CLOUD_VERIFIED_ADAPTERS.has(adapter)) {
     return 'cloud_verified';
   }
   return 'unverified';

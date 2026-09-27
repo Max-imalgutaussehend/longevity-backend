@@ -24,6 +24,11 @@ describe('Health Insurance Verified Data & Fraud Prevention (#88)', () => {
       expect(determineSourceTrustLevel('questionnaire', null)).toBe('unverified');
     });
 
+    it('classifies unknown or upload adapters with metadata/credentials strictly as "unverified"', () => {
+      expect(determineSourceTrustLevel('upload', { someKey: 'data' })).toBe('unverified');
+      expect(determineSourceTrustLevel('custom_adapter', { apiKey: 'secret' })).toBe('unverified');
+    });
+
     it('classifies cloud OAuth providers with credentials as "cloud_verified"', () => {
       expect(determineSourceTrustLevel('withings', { accessToken: 'token' })).toBe('cloud_verified');
       expect(determineSourceTrustLevel('oura', { accessToken: 'token' })).toBe('cloud_verified');
