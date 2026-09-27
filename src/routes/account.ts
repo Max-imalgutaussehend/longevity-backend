@@ -147,6 +147,12 @@ export async function accountRoutes(app: FastifyInstance) {
       .limit(1);
 
     if (!org || org.status !== 'active') {
+      const isKvnr = validateKvnr(joinCode).valid;
+      if (isKvnr) {
+        return reply.status(400).send({
+          title: 'Dies ist eine Krankenversichertennummer (KVNR), kein Beitrittscode. Bitte wähle deine Krankenkasse aus und nutze die KVNR-Verifikation.',
+        });
+      }
       return reply.status(404).send({ title: 'Ungültiger Beitrittscode.' });
     }
 
