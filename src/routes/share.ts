@@ -5,7 +5,13 @@ import { db } from '../db/client.js';
 import { shareTokens, type ShareTokenMetadata } from '../db/schema.js';
 import { env } from '../env.js';
 import { computeScore } from '../score/index.js';
-import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from '../lib/signing.js';
+import {
+  signTokenPayload,
+  verifyTokenSignature,
+  buildTokenPayload,
+  getPublicKeyJwk,
+  getDevSigningKeys,
+} from '../lib/signing.js';
 import { requireUser, getVerifiedUserSamples } from './helpers.js';
 import '../types.js';
 
@@ -65,10 +71,13 @@ export async function shareRoutes(app: FastifyInstance) {
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + validDays * 24 * 60 * 60 * 1000);
 
+    const privateKey = env.SIGNING_KEY_PRIVATE || (env.NODE_ENV !== 'production' ? getDevSigningKeys().privateKey : undefined);
+    if (!privateKey) {
+      return reply.status(500).send({ title: 'Signierschlüssel nicht konfiguriert.' });
+    }
+
     const payload = buildTokenPayload(id, score.band.low, score.band.high, expiresAt.toISOString());
-    const signature = env.SIGNING_KEY_PRIVATE
-      ? signTokenPayload(payload, env.SIGNING_KEY_PRIVATE)
-      : id;
+    const signature = signTokenPayload(payload, privateKey);
 
     const metadata: ShareTokenMetadata = {
       verifiedOnly,
@@ -118,20 +127,38 @@ export async function shareRoutes(app: FastifyInstance) {
     return reply.status(204).send();
   });
 
+  app.get('/verify/public-key', async (_req, reply) => {
+    const publicKey = env.SIGNING_KEY_PUBLIC || (env.NODE_ENV !== 'production' ? getDevSigningKeys().publicKey : undefined);
+    if (!publicKey) {
+      return reply.status(500).send({ title: 'Öffentlicher Signierschlüssel nicht konfiguriert.' });
+    }
+
+    const jwk = getPublicKeyJwk(publicKey);
+    return reply.send({
+      algorithm: 'Ed25519',
+      format: 'spki-pem',
+      publicKey,
+      jwk,
+    });
+  });
+
   app.get('/verify/:id', async (req) => {
     const { id } = req.params as { id: string };
     const [token] = await db.select().from(shareTokens).where(eq(shareTokens.id, id)).limit(1);
 
     if (!token) return { valid: false, reason: 'not_found' };
+
+    const publicKey = env.SIGNING_KEY_PUBLIC || (env.NODE_ENV !== 'production' ? getDevSigningKeys().publicKey : undefined);
+    if (!publicKey || !token.signature || token.signature === token.id) {
+      return { valid: false, reason: 'invalid_signature' };
+    }
+
+    const payload = buildTokenPayload(token.id, token.bandLow, token.bandHigh, token.expiresAt.toISOString());
+    const valid = verifyTokenSignature(payload, token.signature, publicKey);
+    if (!valid) return { valid: false, reason: 'invalid_signature' };
+
     if (token.revokedAt) return { valid: false, reason: 'revoked' };
     if (new Date() > token.expiresAt) return { valid: false, reason: 'expired' };
-
-    // Verify Ed25519 signature when key is configured; fall back gracefully for legacy tokens
-    if (env.SIGNING_KEY_PUBLIC && token.signature !== token.id) {
-      const payload = buildTokenPayload(token.id, token.bandLow, token.bandHigh, token.expiresAt.toISOString());
-      const valid = verifyTokenSignature(payload, token.signature, env.SIGNING_KEY_PUBLIC);
-      if (!valid) return { valid: false, reason: 'invalid_signature' };
-    }
 
     return {
       valid: true,

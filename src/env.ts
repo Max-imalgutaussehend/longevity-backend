@@ -40,4 +40,15 @@ if (!parsed.success) {
   process.exit(1);
 }
 
+if (parsed.data.NODE_ENV === 'production') {
+  const missing: string[] = [];
+  if (!parsed.data.SIGNING_KEY_PRIVATE) missing.push('SIGNING_KEY_PRIVATE');
+  if (!parsed.data.SIGNING_KEY_PUBLIC) missing.push('SIGNING_KEY_PUBLIC');
+
+  if (missing.length > 0) {
+    console.error(`Production startup error: Missing required signing keys: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+}
+
 export const env = parsed.data;
