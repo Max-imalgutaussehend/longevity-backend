@@ -51,9 +51,10 @@ export async function buildApp() {
       secure: 'auto',
     },
     getToken: (req) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const body = req.body as Record<string, unknown> | null | undefined;
+      const csrfFromBody = typeof body?._csrf === 'string' ? body._csrf : undefined;
       return (
-        (req.body as any)?._csrf ||
+        csrfFromBody ||
         (req.headers['x-csrf-token'] as string | undefined) ||
         (req.headers['csrf-token'] as string | undefined) ||
         (req.headers['xsrf-token'] as string | undefined) ||
