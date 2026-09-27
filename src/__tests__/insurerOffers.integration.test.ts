@@ -101,4 +101,23 @@ describe.skipIf(!HAS_DB)('Insurer partner offers scoping — integration', () =>
     expect(isVisible(active)).toBe(true);
     expect(isVisible(always)).toBe(true);
   });
+
+  it('persists and updates minMonths on partner offers', async () => {
+    const [offerWithDuration] = await db.insert(tables.partnerOffers).values({
+      organizationId: orgAId, partnerName: 'Offers Org A',
+      title: 'Holding Offer', description: 'Requires 3 months in band',
+      minBand: 70, minMonths: 3, valueLabel: '20% Rabatt', isDemo: false,
+    }).returning();
+
+    expect(offerWithDuration.minMonths).toBe(3);
+
+    const [updated] = await db.update(tables.partnerOffers)
+      .set({ minMonths: 6 })
+      .where(eq(tables.partnerOffers.id, offerWithDuration.id))
+      .returning();
+
+    expect(updated.minMonths).toBe(6);
+
+    await db.delete(tables.partnerOffers).where(eq(tables.partnerOffers.id, offerWithDuration.id));
+  });
 });

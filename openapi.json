@@ -322,6 +322,12 @@
           "minBand": {
             "type": "integer"
           },
+          "minMonths": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "valueLabel": {
             "type": "string"
           },
@@ -330,6 +336,12 @@
           },
           "qualified": {
             "type": "boolean"
+          },
+          "daysHeld": {
+            "type": "integer"
+          },
+          "daysRemaining": {
+            "type": "integer"
           }
         }
       },
@@ -931,6 +943,12 @@
                     "minimum": 0,
                     "maximum": 100
                   },
+                  "minMonths": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 36,
+                    "nullable": true
+                  },
                   "valueLabel": {
                     "type": "string"
                   },
@@ -1000,6 +1018,12 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 100
+                  },
+                  "minMonths": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 36,
+                    "nullable": true
                   },
                   "valueLabel": {
                     "type": "string"

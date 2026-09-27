@@ -12,7 +12,7 @@ import {
   emailTokens,
 } from '../db/schema.js';
 import { env } from '../env.js';
-import { computeScore } from '../score/index.js';
+import { computeScore, evaluateHoldingPeriod, type SnapshotHistoryItem } from '../score/index.js';
 import { issueEmailToken } from '../lib/emailTokens.js';
 import { sendMail } from '../lib/mail.js';
 import { insurerInviteTemplate, insurerRequestReceivedTemplate } from '../lib/emailTemplates.js';
@@ -80,6 +80,7 @@ export async function insurerRoutes(app: FastifyInstance) {
     const userId = req.session.userId;
 
     let band = { low: 0, high: 100 };
+    let snapshots: SnapshotHistoryItem[] = [];
     if (userId) {
       const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
       if (user) {
@@ -90,21 +91,39 @@ export async function insurerRoutes(app: FastifyInstance) {
           now,
         });
         band = score.band;
+        snapshots = await db.select({
+          computedFor: scoreSnapshots.computedFor,
+          score: scoreSnapshots.score,
+        }).from(scoreSnapshots)
+          .where(eq(scoreSnapshots.userId, userId))
+          .orderBy(desc(scoreSnapshots.computedFor));
       }
     }
 
     return rows
       .filter(o => (!o.validFrom || o.validFrom <= now) && (!o.validUntil || o.validUntil >= now))
-      .map(o => ({
-        id: o.id,
-        partnerName: o.partnerName,
-        title: o.title,
-        description: o.description,
-        minBand: o.minBand,
-        valueLabel: o.valueLabel,
-        isDemo: o.isDemo,
-        qualified: band.low >= o.minBand,
-      }));
+      .map(o => {
+        const holding = evaluateHoldingPeriod({
+          currentBand: band,
+          minBand: o.minBand,
+          minMonths: o.minMonths,
+          snapshots,
+          now,
+        });
+        return {
+          id: o.id,
+          partnerName: o.partnerName,
+          title: o.title,
+          description: o.description,
+          minBand: o.minBand,
+          minMonths: o.minMonths ?? null,
+          valueLabel: o.valueLabel,
+          isDemo: o.isDemo,
+          qualified: holding.qualified,
+          daysHeld: holding.daysHeld,
+          daysRemaining: holding.daysRemaining,
+        };
+      });
   };
 
   app.get('/partner-offers', partnerOffersHandler);
@@ -124,6 +143,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       title: o.title,
       description: o.description,
       minBand: o.minBand,
+      minMonths: o.minMonths ?? null,
       valueLabel: o.valueLabel,
       validFrom: o.validFrom?.toISOString() ?? null,
       validUntil: o.validUntil?.toISOString() ?? null,
@@ -139,17 +159,21 @@ export async function insurerRoutes(app: FastifyInstance) {
       title?: string;
       description?: string;
       minBand?: number;
+      minMonths?: number;
       valueLabel?: string;
       validFrom?: string;
       validUntil?: string;
     };
-    const { title, description, minBand, valueLabel, validFrom, validUntil } = body;
+    const { title, description, minBand, minMonths, valueLabel, validFrom, validUntil } = body;
 
     if (!title || !description || minBand === undefined || !valueLabel) {
       return reply.status(400).send({ title: 'Pflichtfelder fehlen.' });
     }
     if (minBand < 0 || minBand > 100) {
       return reply.status(400).send({ title: 'Mindest-Score-Band muss zwischen 0 und 100 liegen.' });
+    }
+    if (minMonths !== undefined && (minMonths < 0 || minMonths > 36)) {
+      return reply.status(400).send({ title: 'Mindesthaltedauer muss zwischen 0 und 36 Monaten liegen.' });
     }
 
     const [org] = await db.select().from(organizations).where(eq(organizations.id, user.organizationId)).limit(1);
@@ -160,6 +184,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       title,
       description,
       minBand,
+      minMonths: minMonths ?? 0,
       valueLabel,
       validFrom: validFrom ? new Date(validFrom) : null,
       validUntil: validUntil ? new Date(validUntil) : null,
@@ -171,6 +196,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       title: offer.title,
       description: offer.description,
       minBand: offer.minBand,
+      minMonths: offer.minMonths ?? null,
       valueLabel: offer.valueLabel,
       validFrom: offer.validFrom?.toISOString() ?? null,
       validUntil: offer.validUntil?.toISOString() ?? null,
@@ -187,6 +213,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       title?: string;
       description?: string;
       minBand?: number;
+      minMonths?: number | null;
       valueLabel?: string;
       validFrom?: string | null;
       validUntil?: string | null;
@@ -194,6 +221,9 @@ export async function insurerRoutes(app: FastifyInstance) {
 
     if (body.minBand !== undefined && (body.minBand < 0 || body.minBand > 100)) {
       return reply.status(400).send({ title: 'Mindest-Score-Band muss zwischen 0 und 100 liegen.' });
+    }
+    if (body.minMonths !== undefined && body.minMonths !== null && (body.minMonths < 0 || body.minMonths > 36)) {
+      return reply.status(400).send({ title: 'Mindesthaltedauer muss zwischen 0 und 36 Monaten liegen.' });
     }
 
     const [existing] = await db.select().from(partnerOffers)
@@ -205,6 +235,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       ...(body.title !== undefined && { title: body.title }),
       ...(body.description !== undefined && { description: body.description }),
       ...(body.minBand !== undefined && { minBand: body.minBand }),
+      ...(body.minMonths !== undefined && { minMonths: body.minMonths }),
       ...(body.valueLabel !== undefined && { valueLabel: body.valueLabel }),
       ...(body.validFrom !== undefined && { validFrom: body.validFrom ? new Date(body.validFrom) : null }),
       ...(body.validUntil !== undefined && { validUntil: body.validUntil ? new Date(body.validUntil) : null }),
@@ -215,6 +246,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       title: updated.title,
       description: updated.description,
       minBand: updated.minBand,
+      minMonths: updated.minMonths ?? null,
       valueLabel: updated.valueLabel,
       validFrom: updated.validFrom?.toISOString() ?? null,
       validUntil: updated.validUntil?.toISOString() ?? null,

@@ -285,3 +285,5 @@ export function suggestLevers(input: ScoreInput): Lever[] {
     .sort((a, b) => b.delta - a.delta)
     .slice(0, 3);
 }
+
+export { evaluateHoldingPeriod, type HoldingPeriodOptions, type HoldingPeriodResult, type SnapshotHistoryItem } from './holdingPeriod.js';

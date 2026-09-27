@@ -57,6 +57,13 @@
       "when": 1790497918660,
       "tag": "0007_high_meltdown",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790533271329,
+      "tag": "0008_fixed_scream",
+      "breakpoints": true
     }
   ]
 }
