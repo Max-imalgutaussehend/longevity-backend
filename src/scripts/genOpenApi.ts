@@ -15,6 +15,29 @@ paths['/healthz'] = {
     responses: { 200: { description: 'OK' } } },
 };
 
+paths['/auth/csrf'] = {
+  get: {
+    operationId: 'getCsrfToken',
+    tags: ['Auth'],
+    security: publicSecurity,
+    summary: 'Get a fresh CSRF token and set XSRF-TOKEN cookie',
+    responses: {
+      200: {
+        description: 'CSRF token',
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['csrfToken'],
+              properties: { csrfToken: { type: 'string' } },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
 paths['/auth/register'] = {
   post: { operationId: 'register', tags: ['Auth'], security: publicSecurity, summary: 'Register',
     requestBody: { required: true, content: { 'application/json': { schema: {

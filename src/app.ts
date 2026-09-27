@@ -1,12 +1,14 @@
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import session from '@fastify/session';
+import csrf from '@fastify/csrf-protection';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { env } from './env.js';
 import { PgSessionStore } from './lib/pgSessionStore.js';
+import { isCsrfExempt } from './lib/csrf.js';
 import { authRoutes } from './routes/auth.js';
 import { scoreRoutes } from './routes/score.js';
 import { accountRoutes } from './routes/account.js';
@@ -30,15 +32,45 @@ export async function buildApp() {
     secret: env.SESSION_SECRET,
     store: new PgSessionStore(),
     cookie: {
-      // Cloudflare terminates TLS — the API only sees HTTP from the tunnel.
-      // Setting secure:true would suppress Set-Cookie on HTTP connections.
-      // The cookie travels browser→Cloudflare over HTTPS, which is sufficient.
-      secure: false,
+      // With trustProxy: true, 'auto' detects HTTPS via X-Forwarded-Proto header.
+      // In production and over HTTPS connections, the cookie is marked Secure.
+      secure: 'auto',
       httpOnly: true,
       sameSite: 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000,
     },
     saveUninitialized: false,
+  });
+
+  await app.register(csrf, {
+    cookieKey: '_csrf',
+    cookieOpts: {
+      path: '/',
+      sameSite: 'lax',
+      httpOnly: true,
+      secure: 'auto',
+    },
+    getToken: (req) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (
+        (req.body as any)?._csrf ||
+        (req.headers['x-csrf-token'] as string | undefined) ||
+        (req.headers['csrf-token'] as string | undefined) ||
+        (req.headers['xsrf-token'] as string | undefined) ||
+        (req.headers['x-xsrf-token'] as string | undefined)
+      );
+    },
+  });
+
+  app.addHook('preValidation', (req, reply, done) => {
+    if (isCsrfExempt(req.url, req.method)) {
+      return done();
+    }
+    // In test environment, skip CSRF validation unless CSRF is explicitly enforced or tested
+    if (env.NODE_ENV === 'test' && !req.headers['x-enforce-csrf'] && !req.cookies._csrf) {
+      return done();
+    }
+    app.csrfProtection(req, reply, done);
   });
 
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
