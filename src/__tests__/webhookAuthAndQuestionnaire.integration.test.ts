@@ -10,6 +10,7 @@ describe('Issue #98: Health Auto Export Webhook Token-Auth & Questionnaire Separ
   let testUserId: string;
   let testUserSecret: string;
   let sessionCookie: string;
+  let csrfToken: string;
   let db: typeof import('../db/client.js').db;
   let users: typeof import('../db/schema.js').users;
   let sources: typeof import('../db/schema.js').sources;
@@ -42,7 +43,10 @@ describe('Issue #98: Health Auto Export Webhook Token-Auth & Questionnaire Separ
     });
     expect(regRes.statusCode).toBe(201);
     const setCookie = regRes.headers['set-cookie'];
-    sessionCookie = Array.isArray(setCookie) ? setCookie[0] : (setCookie as string);
+    const cookieArray = Array.isArray(setCookie) ? setCookie : [setCookie as string];
+    sessionCookie = cookieArray.map(c => c.split(';')[0]).join('; ');
+    const xsrfCookie = cookieArray.find(c => c.startsWith('XSRF-TOKEN='));
+    csrfToken = xsrfCookie ? xsrfCookie.split(';')[0].replace('XSRF-TOKEN=', '') : '';
 
     const [u] = await db.select().from(users).where(eq(users.email, testEmail)).limit(1);
     testUserId = u.id;
@@ -130,7 +134,7 @@ describe('Issue #98: Health Auto Export Webhook Token-Auth & Questionnaire Separ
       const rotateRes = await app.inject({
         method: 'POST',
         url: '/api/sources/health-auto-export/secret/rotate',
-        headers: { cookie: sessionCookie },
+        headers: { cookie: sessionCookie, 'x-csrf-token': csrfToken },
       });
       expect(rotateRes.statusCode).toBe(200);
       const body = JSON.parse(rotateRes.body);
@@ -174,7 +178,7 @@ describe('Issue #98: Health Auto Export Webhook Token-Auth & Questionnaire Separ
       const res = await app.inject({
         method: 'POST',
         url: '/api/questionnaire',
-        headers: { cookie: sessionCookie },
+        headers: { cookie: sessionCookie, 'x-csrf-token': csrfToken },
         payload: {
           values: [
             { metric: 'smoking', value: 0, unit: 'category' },
@@ -198,7 +202,7 @@ describe('Issue #98: Health Auto Export Webhook Token-Auth & Questionnaire Separ
       const res = await app.inject({
         method: 'POST',
         url: '/api/lifestyle',
-        headers: { cookie: sessionCookie },
+        headers: { cookie: sessionCookie, 'x-csrf-token': csrfToken },
         payload: {
           values: [{ metric: 'alcohol_units', value: 3, unit: 'units/week' }],
         },
@@ -210,7 +214,7 @@ describe('Issue #98: Health Auto Export Webhook Token-Auth & Questionnaire Separ
       const res = await app.inject({
         method: 'POST',
         url: '/api/labs',
-        headers: { cookie: sessionCookie },
+        headers: { cookie: sessionCookie, 'x-csrf-token': csrfToken },
         payload: {
           values: [
             { metric: 'ldl', value: 95, unit: 'mg/dL' },
@@ -250,7 +254,7 @@ describe('Issue #98: Health Auto Export Webhook Token-Auth & Questionnaire Separ
       const patchRes = await app.inject({
         method: 'PATCH',
         url: `/api/sources/${labSrc.id}`,
-        headers: { cookie: sessionCookie },
+        headers: { cookie: sessionCookie, 'x-csrf-token': csrfToken },
         payload: { enabled: false },
       });
       expect(patchRes.statusCode).toBe(204);
