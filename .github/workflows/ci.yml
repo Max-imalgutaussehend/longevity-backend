@@ -22,6 +22,10 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
     env:
       DATABASE_URL: postgres://longevity:longevity_test@localhost:5432/longevity_test
       SESSION_SECRET: test-session-secret-32-bytes-long!
