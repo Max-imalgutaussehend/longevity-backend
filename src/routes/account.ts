@@ -14,12 +14,15 @@ import {
 } from '../db/schema.js';
 import { CURRENT_HEALTH_DATA_CONSENT_VERSION, HEALTH_DATA_CONSENT_TEXT } from '../lib/consent.js';
 import { requireUser, requireRole } from './helpers.js';
+import { setCsrfCookies } from '../lib/csrf.js';
 import '../types.js';
 
 export async function accountRoutes(app: FastifyInstance) {
   app.get('/me', async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
+
+    setCsrfCookies(reply);
 
     const now = new Date();
     const chronoAge = (now.getTime() - new Date(user.birthDate).getTime()) / (1000 * 60 * 60 * 24 * 365.25);

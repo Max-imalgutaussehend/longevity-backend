@@ -9,9 +9,14 @@ import { issueEmailToken, consumeEmailToken } from '../lib/emailTokens.js';
 import { sendMail } from '../lib/mail.js';
 import { verifyEmailTemplate, passwordResetTemplate } from '../lib/emailTemplates.js';
 import { requireUser } from './helpers.js';
+import { setCsrfCookies, clearCsrfCookies } from '../lib/csrf.js';
 import '../types.js';
 
 export async function authRoutes(app: FastifyInstance) {
+  app.get('/csrf', async (req, reply) => {
+    const csrfToken = setCsrfCookies(reply);
+    return { csrfToken };
+  });
   app.post('/register', async (req, reply) => {
     const body = req.body as { email?: string; password?: string; birthDate?: string; sex?: string; displayName?: string };
     const { email, password, birthDate, sex, displayName } = body;
@@ -45,6 +50,7 @@ export async function authRoutes(app: FastifyInstance) {
     }).returning();
 
     req.session.userId = user.id;
+    setCsrfCookies(reply);
 
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const token = await issueEmailToken(user.id, 'verify_email');
@@ -166,6 +172,7 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     req.session.userId = user.id;
+    setCsrfCookies(reply);
     return reply.status(200).send({ ok: true });
   });
 
@@ -190,11 +197,13 @@ export async function authRoutes(app: FastifyInstance) {
     if (!ok) return reply.status(401).send({ title: 'E-Mail oder Passwort falsch.' });
 
     req.session.userId = user.id;
+    setCsrfCookies(reply);
     return reply.status(200).send({ ok: true });
   });
 
   app.post('/logout', async (req, reply) => {
     await req.session.destroy();
+    clearCsrfCookies(reply);
     return reply.status(204).send();
   });
 

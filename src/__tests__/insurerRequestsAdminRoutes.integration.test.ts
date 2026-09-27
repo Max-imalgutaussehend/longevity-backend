@@ -1,5 +1,6 @@
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://longevity:longevity_dev@localhost:5432/longevity';
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-32-bytes-long!';
+process.env.SMTP_URL = process.env.SMTP_URL || 'smtp://localhost:1025';
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { eq } from 'drizzle-orm';
@@ -19,6 +20,7 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let tables: any;
   let adminCookie: string;
+  let adminCsrfToken: string = '';
   let adminUserId: string;
   const createdRequestIds: string[] = [];
   const createdUserIds: string[] = [];
@@ -61,7 +63,10 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     });
     expect(loginRes.statusCode).toBe(200);
     const setCookie = loginRes.headers['set-cookie'];
-    adminCookie = Array.isArray(setCookie) ? setCookie[0] : (setCookie as string);
+    const cookieArray = Array.isArray(setCookie) ? setCookie : [setCookie as string];
+    adminCookie = cookieArray.map(c => c.split(';')[0]).join('; ');
+    const xsrfCookie = cookieArray.find(c => c.startsWith('XSRF-TOKEN='));
+    adminCsrfToken = xsrfCookie ? xsrfCookie.split(';')[0].replace('XSRF-TOKEN=', '') : '';
   });
 
   afterEach(async () => {
@@ -96,7 +101,7 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     const res = await app.inject({
       method: 'POST',
       url: `/api/admin/insurer-requests/${request.id}/approve`,
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
 
     expect(res.statusCode).toBe(200);
@@ -121,7 +126,7 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     const first = await app.inject({
       method: 'POST',
       url: `/api/admin/insurer-requests/${request.id}/approve`,
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
     expect(first.statusCode).toBe(200);
     createdOrgIds.push(JSON.parse(first.payload).organizationId);
@@ -131,7 +136,7 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     const second = await app.inject({
       method: 'POST',
       url: `/api/admin/insurer-requests/${request.id}/approve`,
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
     expect(second.statusCode).toBe(400);
   });
@@ -150,7 +155,7 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     const res = await app.inject({
       method: 'POST',
       url: `/api/admin/insurer-requests/${request.id}/approve`,
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
     expect(res.statusCode).toBe(409);
   });
@@ -159,7 +164,7 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     const res = await app.inject({
       method: 'POST',
       url: '/api/admin/insurer-requests/00000000-0000-0000-0000-000000000000/approve',
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
     expect(res.statusCode).toBe(404);
   });
@@ -169,7 +174,7 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     const res = await app.inject({
       method: 'POST',
       url: `/api/admin/insurer-requests/${request.id}/reject`,
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
     expect(res.statusCode).toBe(200);
 
@@ -183,7 +188,7 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     const res = await app.inject({
       method: 'POST',
       url: `/api/admin/insurer-requests/${request.id}/resend-invite`,
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
     expect(res.statusCode).toBe(400);
   });
@@ -193,7 +198,7 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     const approveRes = await app.inject({
       method: 'POST',
       url: `/api/admin/insurer-requests/${request.id}/approve`,
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
     createdOrgIds.push(JSON.parse(approveRes.payload).organizationId);
     const [insurerUser] = await db.select().from(tables.users).where(eq(tables.users.email, request.contactEmail));
@@ -202,7 +207,7 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     const res = await app.inject({
       method: 'POST',
       url: `/api/admin/insurer-requests/${request.id}/resend-invite`,
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
     expect(res.statusCode).toBe(200);
   });
@@ -212,7 +217,7 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     const res = await app.inject({
       method: 'DELETE',
       url: `/api/admin/insurer-requests/${request.id}`,
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
     expect(res.statusCode).toBe(400);
   });
@@ -222,13 +227,13 @@ describe.skipIf(!HAS_DB)('Admin insurer-request routes — HTTP integration', ()
     await app.inject({
       method: 'POST',
       url: `/api/admin/insurer-requests/${request.id}/reject`,
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
 
     const res = await app.inject({
       method: 'DELETE',
       url: `/api/admin/insurer-requests/${request.id}`,
-      headers: { cookie: adminCookie },
+      headers: { cookie: adminCookie, 'x-csrf-token': adminCsrfToken },
     });
     expect(res.statusCode).toBe(204);
 

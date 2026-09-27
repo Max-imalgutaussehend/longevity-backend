@@ -431,6 +431,36 @@
         }
       }
     },
+    "/auth/csrf": {
+      "get": {
+        "operationId": "getCsrfToken",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "summary": "Get a fresh CSRF token and set XSRF-TOKEN cookie",
+        "responses": {
+          "200": {
+            "description": "CSRF token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "csrfToken"
+                  ],
+                  "properties": {
+                    "csrfToken": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/register": {
       "post": {
         "operationId": "register",
