@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
-import { hash, verify as argon2Verify } from '@node-rs/argon2';
 import { env } from '../env.js';
 import { db } from '../db/client.js';
 import { users, organizations } from '../db/schema.js';
 import { isWeakPassword } from '../lib/weakPasswords.js';
+import { hashPassword, verifyPassword, passwordSchema } from '../lib/password.js';
 import { issueEmailToken, consumeEmailToken } from '../lib/emailTokens.js';
 import { sendMail } from '../lib/mail.js';
 import { verifyEmailTemplate, passwordResetTemplate } from '../lib/emailTemplates.js';
@@ -19,8 +19,9 @@ export async function authRoutes(app: FastifyInstance) {
     if (!email || !password || !birthDate || !sex) {
       return reply.status(400).send({ title: 'Pflichtfelder fehlen.' });
     }
-    if (password.length < 10) {
-      return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
+    const pwResult = passwordSchema.safeParse(password);
+    if (!pwResult.success) {
+      return reply.status(400).send({ title: pwResult.error.issues[0]?.message ?? 'Passwort entspricht nicht den Anforderungen.' });
     }
     if (isWeakPassword(password)) {
       return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
@@ -34,7 +35,7 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(409).send({ title: 'E-Mail bereits vergeben.' });
     }
 
-    const passwordHash = await hash(password);
+    const passwordHash = await hashPassword(password);
     const [user] = await db.insert(users).values({
       email,
       passwordHash,
@@ -113,7 +114,10 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/reset-password', async (req, reply) => {
     const { token, password } = req.body as { token?: string; password?: string };
     if (!token || !password) return reply.status(400).send({ title: 'Token und Passwort erforderlich.' });
-    if (password.length < 10) return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
+    const pwResult = passwordSchema.safeParse(password);
+    if (!pwResult.success) {
+      return reply.status(400).send({ title: pwResult.error.issues[0]?.message ?? 'Passwort entspricht nicht den Anforderungen.' });
+    }
     if (isWeakPassword(password)) return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
 
     const result = await consumeEmailToken(token, 'reset_password');
@@ -126,7 +130,7 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(400).send({ title: reasonTitle });
     }
 
-    const passwordHash = await hash(password);
+    const passwordHash = await hashPassword(password);
     await db.update(users).set({ passwordHash }).where(eq(users.id, result.userId));
 
     return reply.status(200).send({ ok: true });
@@ -135,7 +139,10 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/accept-invite', async (req, reply) => {
     const { token, password } = req.body as { token?: string; password?: string };
     if (!token || !password) return reply.status(400).send({ title: 'Token und Passwort erforderlich.' });
-    if (password.length < 10) return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
+    const pwResult = passwordSchema.safeParse(password);
+    if (!pwResult.success) {
+      return reply.status(400).send({ title: pwResult.error.issues[0]?.message ?? 'Passwort entspricht nicht den Anforderungen.' });
+    }
     if (isWeakPassword(password)) return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
 
     const result = await consumeEmailToken(token, 'insurer_invite');
@@ -148,7 +155,7 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(400).send({ title: reasonTitle });
     }
 
-    const passwordHash = await hash(password);
+    const passwordHash = await hashPassword(password);
     const [user] = await db.update(users)
       .set({ passwordHash, emailVerifiedAt: new Date() })
       .where(eq(users.id, result.userId))
@@ -179,7 +186,7 @@ export async function authRoutes(app: FastifyInstance) {
     const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (!user) return reply.status(401).send({ title: 'E-Mail oder Passwort falsch.' });
 
-    const ok = await argon2Verify(user.passwordHash, password);
+    const ok = await verifyPassword(user.passwordHash, password);
     if (!ok) return reply.status(401).send({ title: 'E-Mail oder Passwort falsch.' });
 
     req.session.userId = user.id;

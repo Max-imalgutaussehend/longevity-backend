@@ -1,7 +1,7 @@
 import { db } from '../db/client.js';
 import { users, sources, samples } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
-import { hash } from '@node-rs/argon2';
+import { hashPassword } from '../lib/password.js';
 import { generate } from '../mock/generate.js';
 import demoFixture from '../score/__tests__/__fixtures__/demo.json';
 
@@ -18,7 +18,7 @@ export async function run() {
     await db.delete(users).where(eq(users.id, existing[0].id));
   }
 
-  const passwordHash = await hash(DEMO_PASSWORD);
+  const passwordHash = await hashPassword(DEMO_PASSWORD);
   const [user] = await db.insert(users).values({
     email: DEMO_EMAIL,
     passwordHash,

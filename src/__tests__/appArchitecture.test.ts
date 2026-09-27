@@ -50,6 +50,22 @@ describe('Application Factory & Route Plugin Architecture (app.ts)', () => {
       expect(body.title).toBe('Passwort muss mindestens 10 Zeichen haben.');
     });
 
+    it('rejects registration with password lacking complexity', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          email: 'test@example.com',
+          password: 'onlylowercaseletters',
+          birthDate: '1990-01-01',
+          sex: 'm',
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.payload);
+      expect(body.title).toBe('Passwort muss mindestens einen Großbuchstaben enthalten.');
+    });
+
     it('rejects registration with invalid sex value', async () => {
       const res = await app.inject({
         method: 'POST',

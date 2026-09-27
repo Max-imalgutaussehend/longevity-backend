@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { eq, desc, and, inArray } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
-import { hash } from '@node-rs/argon2';
+import { hashPassword } from '../lib/password.js';
 import { db } from '../db/client.js';
 import {
   users,
@@ -304,7 +304,7 @@ export async function insurerRoutes(app: FastifyInstance) {
         joinCode: randomBytes(6).toString('hex'),
       }).returning();
 
-      const unusablePasswordHash = await hash(randomBytes(32).toString('base64url'));
+      const unusablePasswordHash = await hashPassword(randomBytes(32).toString('base64url'));
       const [insurerUser] = await tx.insert(users).values({
         email: request.contactEmail,
         passwordHash: unusablePasswordHash,

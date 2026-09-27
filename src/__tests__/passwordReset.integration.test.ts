@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { verify as argon2Verify } from '@node-rs/argon2';
+import { hashPassword, verifyPassword } from '../lib/password.js';
 
 const HAS_DB = !!process.env.DATABASE_URL;
 
@@ -25,7 +25,7 @@ describe.skipIf(!HAS_DB)('Password reset tokens — integration', () => {
     issueEmailToken = tokenModule.issueEmailToken;
     consumeEmailToken = tokenModule.consumeEmailToken;
 
-    originalPasswordHash = await import('@node-rs/argon2').then(m => m.hash('original-password-123'));
+    originalPasswordHash = await hashPassword('original-password-123');
     const [user] = await db.insert(tables.users).values({
       email: `reset-test-${Date.now()}@test.local`,
       passwordHash: originalPasswordHash,
@@ -53,12 +53,12 @@ describe.skipIf(!HAS_DB)('Password reset tokens — integration', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const newHash = await import('@node-rs/argon2').then(m => m.hash('brand-new-password-456'));
+    const newHash = await hashPassword('brand-new-password-456');
     await db.update(tables.users).set({ passwordHash: newHash }).where(eq(tables.users.id, userId));
 
     const [updated] = await db.select().from(tables.users).where(eq(tables.users.id, userId));
-    expect(await argon2Verify(updated.passwordHash, 'brand-new-password-456')).toBe(true);
-    expect(await argon2Verify(updated.passwordHash, 'original-password-123')).toBe(false);
+    expect(await verifyPassword(updated.passwordHash, 'brand-new-password-456')).toBe(true);
+    expect(await verifyPassword(updated.passwordHash, 'original-password-123')).toBe(false);
 
     const replay = await consumeEmailToken(token, 'reset_password');
     expect(replay.ok).toBe(false);
