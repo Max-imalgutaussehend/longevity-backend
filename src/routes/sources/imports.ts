@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { eq, and } from 'drizzle-orm';
 import { Readable } from 'node:stream';
 import { db } from '../../db/client.js';
@@ -77,7 +77,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
     return { inserted, sourceId: src.id };
   });
 
-  async function ingestHealthAutoExport(user: { id: string; birthDate: string }, payload: any) {
+  async function ingestHealthAutoExport(user: { id: string; birthDate: string }, payload: unknown) {
     const parsedSamples = parseHealthAutoExport(payload, { birthDate: user.birthDate });
 
     let [src] = await db.select().from(sources)
@@ -187,7 +187,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
   async function handleQuestionnaireSubmission(
     user: { id: string },
     body: { values?: Array<{ metric: string; value: number; unit: string; measuredAt?: string }> },
-    reply: any,
+    reply: FastifyReply,
   ) {
     if (!Array.isArray(body.values) || body.values.length === 0) {
       return reply.status(400).send({ title: 'values-Array erforderlich.' });
@@ -235,13 +235,13 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
   app.post('/questionnaire', async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
-    return handleQuestionnaireSubmission(user, req.body as any, reply);
+    return handleQuestionnaireSubmission(user, (req.body as { values?: Array<{ metric: string; value: number; unit: string; measuredAt?: string }> }) || {}, reply);
   });
 
   app.post('/lifestyle', async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
-    return handleQuestionnaireSubmission(user, req.body as any, reply);
+    return handleQuestionnaireSubmission(user, (req.body as { values?: Array<{ metric: string; value: number; unit: string; measuredAt?: string }> }) || {}, reply);
   });
 
   app.post('/labs', async (req, reply) => {

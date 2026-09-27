@@ -170,9 +170,10 @@ function parseStrengthSessions(workouts: HaeWorkout[]): Sample[] {
 }
 
 export function parseHealthAutoExport(payload: HaePayload, options?: HealthAutoExportOptions): Sample[] {
-  const p = payload as any;
-  const metrics: HaeMetric[] = Array.isArray(payload) ? payload : (p.metrics ?? p.data?.metrics ?? []);
-  const workouts: HaeWorkout[] = p.workouts ?? p.data?.workouts ?? [];
+  const obj = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {};
+  const dataObj = typeof obj.data === 'object' && obj.data !== null ? (obj.data as Record<string, unknown>) : undefined;
+  const metrics: HaeMetric[] = Array.isArray(payload) ? payload : ((obj.metrics ?? dataObj?.metrics ?? []) as HaeMetric[]);
+  const workouts: HaeWorkout[] = (obj.workouts ?? dataObj?.workouts ?? []) as HaeWorkout[];
   const samples: Sample[] = [];
 
   for (const metric of metrics) {

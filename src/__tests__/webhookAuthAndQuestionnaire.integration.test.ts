@@ -265,11 +265,11 @@ describe('Issue #98: Health Auto Export Webhook Token-Auth & Questionnaire Separ
       const summary = JSON.parse(summaryRes.body);
 
       // ldl should be hidden because lab is disabled
-      const ldlMetric = summary.metrics.find((m: any) => m.metric === 'ldl');
+      const ldlMetric = summary.metrics.find((m: { metric: string }) => m.metric === 'ldl');
       expect(ldlMetric).toBeUndefined();
 
       // smoking and alcohol should still be present because questionnaire is separate!
-      const smokingMetric = summary.metrics.find((m: any) => m.metric === 'smoking');
+      const smokingMetric = summary.metrics.find((m: { metric: string; sourceKind?: string }) => m.metric === 'smoking');
       expect(smokingMetric).toBeDefined();
       expect(smokingMetric.sourceKind).toBe('questionnaire');
     });
