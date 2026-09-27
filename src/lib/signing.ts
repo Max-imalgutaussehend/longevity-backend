@@ -46,6 +46,28 @@ export function isValidEd25519PublicKey(pem: string): boolean {
   }
 }
 
+export function getActivePrivateKey(): string | undefined {
+  const candidate = process.env.SIGNING_KEY_PRIVATE;
+  if (candidate && isValidEd25519PrivateKey(candidate)) {
+    return candidate;
+  }
+  if (process.env.NODE_ENV !== 'production') {
+    return getDevSigningKeys().privateKey;
+  }
+  return undefined;
+}
+
+export function getActivePublicKey(): string | undefined {
+  const candidate = process.env.SIGNING_KEY_PUBLIC;
+  if (candidate && isValidEd25519PublicKey(candidate)) {
+    return candidate;
+  }
+  if (process.env.NODE_ENV !== 'production') {
+    return getDevSigningKeys().publicKey;
+  }
+  return undefined;
+}
+
 export function getPublicKeyJwk(publicKeyPem: string): Ed25519Jwk | null {
   try {
     const keyObj = createPublicKey(publicKeyPem);

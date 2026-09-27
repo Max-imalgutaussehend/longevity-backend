@@ -3,14 +3,14 @@ import { eq, desc, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { shareTokens, type ShareTokenMetadata } from '../db/schema.js';
-import { env } from '../env.js';
 import { computeScore } from '../score/index.js';
 import {
   signTokenPayload,
   verifyTokenSignature,
   buildTokenPayload,
   getPublicKeyJwk,
-  getDevSigningKeys,
+  getActivePrivateKey,
+  getActivePublicKey,
 } from '../lib/signing.js';
 import { requireUser, getVerifiedUserSamples } from './helpers.js';
 import '../types.js';
@@ -71,7 +71,7 @@ export async function shareRoutes(app: FastifyInstance) {
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + validDays * 24 * 60 * 60 * 1000);
 
-    const privateKey = env.SIGNING_KEY_PRIVATE || (env.NODE_ENV !== 'production' ? getDevSigningKeys().privateKey : undefined);
+    const privateKey = getActivePrivateKey();
     if (!privateKey) {
       return reply.status(500).send({ title: 'Signierschlüssel nicht konfiguriert.' });
     }
@@ -128,7 +128,7 @@ export async function shareRoutes(app: FastifyInstance) {
   });
 
   app.get('/verify/public-key', async (_req, reply) => {
-    const publicKey = env.SIGNING_KEY_PUBLIC || (env.NODE_ENV !== 'production' ? getDevSigningKeys().publicKey : undefined);
+    const publicKey = getActivePublicKey();
     if (!publicKey) {
       return reply.status(500).send({ title: 'Öffentlicher Signierschlüssel nicht konfiguriert.' });
     }
@@ -148,7 +148,7 @@ export async function shareRoutes(app: FastifyInstance) {
 
     if (!token) return { valid: false, reason: 'not_found' };
 
-    const publicKey = env.SIGNING_KEY_PUBLIC || (env.NODE_ENV !== 'production' ? getDevSigningKeys().publicKey : undefined);
+    const publicKey = getActivePublicKey();
     if (!publicKey || !token.signature || token.signature === token.id) {
       return { valid: false, reason: 'invalid_signature' };
     }

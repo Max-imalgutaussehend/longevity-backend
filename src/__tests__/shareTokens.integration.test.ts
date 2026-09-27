@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import {
   signTokenPayload,
   buildTokenPayload,
-  getDevSigningKeys,
+  getActivePrivateKey,
 } from '../lib/signing.js';
 
 const HAS_DB = !!process.env.DATABASE_URL;
@@ -112,7 +112,7 @@ describe.skipIf(!HAS_DB)('Share Tokens & Verification Endpoint Integration', () 
     const bandHigh = 85;
 
     const payload = buildTokenPayload(id, bandLow, bandHigh, expiresAt.toISOString());
-    const signature = signTokenPayload(payload, getDevSigningKeys().privateKey);
+    const signature = signTokenPayload(payload, getActivePrivateKey()!);
 
     await db.insert(tables.shareTokens).values({
       id,
@@ -154,7 +154,7 @@ describe.skipIf(!HAS_DB)('Share Tokens & Verification Endpoint Integration', () 
     const bandHigh = 75;
 
     const payload = buildTokenPayload(id, bandLow, bandHigh, expiresAt.toISOString());
-    const signature = signTokenPayload(payload, getDevSigningKeys().privateKey);
+    const signature = signTokenPayload(payload, getActivePrivateKey()!);
 
     await db.insert(tables.shareTokens).values({
       id,
@@ -185,7 +185,7 @@ describe.skipIf(!HAS_DB)('Share Tokens & Verification Endpoint Integration', () 
     const bandHigh = 75;
 
     const payload = buildTokenPayload(id, bandLow, bandHigh, expiresAt.toISOString());
-    const signature = signTokenPayload(payload, getDevSigningKeys().privateKey);
+    const signature = signTokenPayload(payload, getActivePrivateKey()!);
 
     await db.insert(tables.shareTokens).values({
       id,
