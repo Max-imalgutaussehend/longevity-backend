@@ -31,13 +31,15 @@ describe('CSRF Protection & Secure Cookie Configuration (#103)', () => {
     const email = `csrf-test-${Date.now()}@example.com`;
     const pwHash = await hashPassword('SecureTestPassword123!');
 
-    await db.execute(sql`
-      INSERT INTO users (id, email, password_hash, birth_date, sex, email_verified_at)
-      VALUES (${userId}, ${email}, ${pwHash}, '1992-05-15', 'm', NOW())
-      ON CONFLICT (id) DO NOTHING
-    `);
+    const [user] = await db.insert(users).values({
+      id: userId,
+      email,
+      passwordHash: pwHash,
+      birthDate: '1992-05-15',
+      sex: 'm',
+      emailVerifiedAt: new Date(),
+    }).returning();
 
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     testUser = user;
   });
 
