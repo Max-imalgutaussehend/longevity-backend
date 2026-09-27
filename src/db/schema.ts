@@ -94,6 +94,16 @@ export const scoreSnapshots = pgTable('score_snapshots', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ uniq: unique().on(t.userId, t.computedFor) }));
 
+export interface ShareTokenMetadata {
+  verifiedOnly: boolean;
+  trustLevel: 'unverified' | 'cloud_verified' | 'certified_medical';
+  verifiedSources: string[];
+  totalSampleCount: number;
+  excludedSampleCount: number;
+  activeDays: number;
+  certificateType: string;
+}
+
 export const shareTokens = pgTable('share_tokens', {
   id: text('id').primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -104,6 +114,7 @@ export const shareTokens = pgTable('share_tokens', {
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
   partnerRef: text('partner_ref'),
   signature: text('signature').notNull(),
+  metadata: jsonb('metadata').$type<ShareTokenMetadata>(),
 }, (t) => ({ userIdx: index().on(t.userId) }));
 
 export const partnerOffers = pgTable('partner_offers', {

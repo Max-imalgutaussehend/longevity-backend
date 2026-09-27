@@ -4,6 +4,7 @@ import { db } from '../db/client.js';
 import { users, samples, sources } from '../db/schema.js';
 import type { Role } from '../db/schema.js';
 import type { Sample } from '../score/types.js';
+import { filterPlausibleSamples } from '../score/plausibility.js';
 import '../types.js';
 
 export const METRIC_LABELS: Record<string, string> = {
@@ -56,6 +57,17 @@ export async function requireRole(req: FastifyRequest, reply: FastifyReply, role
   return user;
 }
 
+export type SourceTrustLevel = 'mock' | 'unverified' | 'cloud_verified' | 'certified_medical';
+
+export function determineSourceTrustLevel(adapter: string, credentials: unknown): SourceTrustLevel {
+  if (adapter === 'mock') return 'mock';
+  if (adapter === 'fhir') return 'certified_medical';
+  if (['withings', 'oura', 'strava', 'google-fit', 'google-health'].includes(adapter) || (credentials !== null && credentials !== undefined)) {
+    return 'cloud_verified';
+  }
+  return 'unverified';
+}
+
 export async function getUserSamples(userId: string): Promise<Sample[]> {
   const rows = await db
     .select({
@@ -76,6 +88,84 @@ export async function getUserSamples(userId: string): Promise<Sample[]> {
     measuredAt: r.measuredAt.toISOString(),
     sourceKind: (r.sourceKind ?? 'apple_health') as Sample['sourceKind'],
   }));
+}
+
+export async function getVerifiedUserSamples(userId: string, options?: { verifiedOnly?: boolean }): Promise<{
+  samples: Sample[];
+  verifiedSources: string[];
+  totalSampleCount: number;
+  excludedSampleCount: number;
+  implausibleCount: number;
+  trustLevel: 'unverified' | 'cloud_verified' | 'certified_medical';
+  hasVerifiedData: boolean;
+  activeDays: number;
+}> {
+  const verifiedOnly = options?.verifiedOnly ?? false;
+
+  const rows = await db
+    .select({
+      metric: samples.metric,
+      value: samples.value,
+      unit: samples.unit,
+      measuredAt: samples.measuredAt,
+      sourceKind: sources.kind,
+      sourceAdapter: sources.adapter,
+      credentials: sources.credentials,
+    })
+    .from(samples)
+    .innerJoin(sources, eq(samples.sourceId, sources.id))
+    .where(and(eq(samples.userId, userId), eq(sources.enabled, true)));
+
+  let excludedSampleCount = 0;
+  const verifiedSourcesSet = new Set<string>();
+  const activeDaysSet = new Set<string>();
+  let highestTrust: 'unverified' | 'cloud_verified' | 'certified_medical' = 'unverified';
+
+  const rawCandidateSamples: Sample[] = [];
+
+  for (const r of rows) {
+    const trust = determineSourceTrustLevel(r.sourceAdapter, r.credentials);
+    const isVerified = trust === 'cloud_verified' || trust === 'certified_medical';
+
+    if (verifiedOnly && !isVerified) {
+      excludedSampleCount++;
+      continue;
+    }
+
+    if (isVerified) {
+      verifiedSourcesSet.add(r.sourceKind);
+      if (trust === 'certified_medical') {
+        highestTrust = 'certified_medical';
+      } else if (highestTrust !== 'certified_medical') {
+        highestTrust = 'cloud_verified';
+      }
+    }
+
+    const isoDate = r.measuredAt.toISOString();
+    activeDaysSet.add(isoDate.slice(0, 10));
+
+    rawCandidateSamples.push({
+      metric: r.metric as Sample['metric'],
+      value: r.value,
+      unit: r.unit,
+      measuredAt: isoDate,
+      sourceKind: (r.sourceKind ?? 'apple_health') as Sample['sourceKind'],
+    });
+  }
+
+  // Filter out any biologically impossible or fraudulent values
+  const { plausible, implausibleCount } = filterPlausibleSamples(rawCandidateSamples);
+
+  return {
+    samples: plausible,
+    verifiedSources: Array.from(verifiedSourcesSet),
+    totalSampleCount: rows.length,
+    excludedSampleCount: excludedSampleCount + implausibleCount,
+    implausibleCount,
+    trustLevel: highestTrust,
+    hasVerifiedData: verifiedSourcesSet.size > 0 && plausible.length > 0,
+    activeDays: activeDaysSet.size,
+  };
 }
 
 export async function upsertGoogleFitSamples(userId: string, sourceId: string, parsedSamples: Sample[]): Promise<number> {

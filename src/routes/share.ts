@@ -2,11 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { eq, desc, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
-import { shareTokens } from '../db/schema.js';
+import { shareTokens, type ShareTokenMetadata } from '../db/schema.js';
 import { env } from '../env.js';
 import { computeScore } from '../score/index.js';
 import { signTokenPayload, verifyTokenSignature, buildTokenPayload } from '../lib/signing.js';
-import { requireUser, getUserSamples } from './helpers.js';
+import { requireUser, getVerifiedUserSamples } from './helpers.js';
 import '../types.js';
 
 export async function shareRoutes(app: FastifyInstance) {
@@ -26,6 +26,10 @@ export async function shareRoutes(app: FastifyInstance) {
       expiresAt: t.expiresAt.toISOString(),
       revokedAt: t.revokedAt?.toISOString() ?? null,
       partnerRef: t.partnerRef,
+      verifiedOnly: t.metadata?.verifiedOnly ?? false,
+      trustLevel: t.metadata?.trustLevel ?? 'unverified',
+      verifiedSources: t.metadata?.verifiedSources ?? [],
+      certificateType: t.metadata?.certificateType ?? (t.metadata?.verifiedOnly ? 'GKV / PKV Verifizierter Prämiennachweis' : 'Standard Score-Nachweis'),
     }));
   });
 
@@ -33,15 +37,29 @@ export async function shareRoutes(app: FastifyInstance) {
     const user = await requireUser(req, reply);
     if (!user) return;
 
-    const userSamples = await getUserSamples(user.id);
+    const body = (req.body as { days?: number; verifiedOnly?: boolean } | undefined) ?? {};
+    const { days: daysReq, verifiedOnly = false } = body;
+    const validDays = [30, 90, 180].includes(daysReq ?? 0) ? (daysReq ?? 90) : 90;
+
+    let sampleData;
+    if (verifiedOnly) {
+      sampleData = await getVerifiedUserSamples(user.id, { verifiedOnly: true });
+      if (!sampleData.hasVerifiedData) {
+        return reply.status(400).send({
+          title: 'Keine verifizierten Gesundheitsdaten vorhanden.',
+          detail: 'Für offizielle Krankenkassen-Nachweise muss mindestens eine verifizierte Datenquelle (z. B. Withings, Oura, Strava oder Google Health) verbunden sein. Mock- und manuelle Daten sind ausgeschlossen.',
+          code: 'NO_VERIFIED_SOURCES',
+        });
+      }
+    } else {
+      sampleData = await getVerifiedUserSamples(user.id, { verifiedOnly: false });
+    }
+
     const score = computeScore({
       profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
-      samples: userSamples,
+      samples: sampleData.samples,
       now: new Date(),
     });
-
-    const { days: daysReq } = req.body as { days?: number };
-    const validDays = [30, 90, 180].includes(daysReq ?? 0) ? (daysReq ?? 90) : 90;
 
     const id = randomUUID();
     const issuedAt = new Date();
@@ -52,6 +70,18 @@ export async function shareRoutes(app: FastifyInstance) {
       ? signTokenPayload(payload, env.SIGNING_KEY_PRIVATE)
       : id;
 
+    const metadata: ShareTokenMetadata = {
+      verifiedOnly,
+      trustLevel: sampleData.trustLevel,
+      verifiedSources: sampleData.verifiedSources,
+      totalSampleCount: sampleData.totalSampleCount,
+      excludedSampleCount: sampleData.excludedSampleCount,
+      activeDays: sampleData.activeDays,
+      certificateType: verifiedOnly
+        ? 'GKV / PKV Verifizierter Prämiennachweis'
+        : 'Standard Score-Nachweis',
+    };
+
     const [token] = await db.insert(shareTokens).values({
       id,
       userId: user.id,
@@ -60,6 +90,7 @@ export async function shareRoutes(app: FastifyInstance) {
       issuedAt,
       expiresAt,
       signature,
+      metadata,
     }).returning();
 
     return reply.status(201).send({
@@ -70,6 +101,10 @@ export async function shareRoutes(app: FastifyInstance) {
       expiresAt: token.expiresAt.toISOString(),
       revokedAt: null,
       partnerRef: null,
+      verifiedOnly: token.metadata?.verifiedOnly ?? false,
+      trustLevel: token.metadata?.trustLevel ?? 'unverified',
+      verifiedSources: token.metadata?.verifiedSources ?? [],
+      certificateType: token.metadata?.certificateType ?? (token.metadata?.verifiedOnly ? 'GKV / PKV Verifizierter Prämiennachweis' : 'Standard Score-Nachweis'),
     });
   });
 
@@ -103,6 +138,13 @@ export async function shareRoutes(app: FastifyInstance) {
       band: { low: token.bandLow, high: token.bandHigh },
       issuedAt: token.issuedAt.toISOString(),
       expiresAt: token.expiresAt.toISOString(),
+      verifiedOnly: token.metadata?.verifiedOnly ?? false,
+      trustLevel: token.metadata?.trustLevel ?? 'unverified',
+      verifiedSources: token.metadata?.verifiedSources ?? [],
+      certificateType: token.metadata?.certificateType ?? (token.metadata?.verifiedOnly ? 'GKV / PKV Verifizierter Prämiennachweis' : 'Standard Score-Nachweis'),
+      sampleCount: token.metadata?.totalSampleCount,
+      activeDays: token.metadata?.activeDays,
+      issuer: 'LONGEVITY Health Intermediary (Ed25519 zertifiziert)',
     };
   });
 }
