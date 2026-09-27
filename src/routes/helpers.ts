@@ -69,11 +69,11 @@ export const CLOUD_VERIFIED_ADAPTERS = new Set([
   'oauth',
 ]);
 
-export function determineSourceTrustLevel(adapter: string, _credentials?: unknown): SourceTrustLevel {
+export function determineSourceTrustLevel(adapter: string, credentials?: unknown): SourceTrustLevel {
   if (adapter === 'mock') return 'mock';
   if (adapter === 'fhir') return 'certified_medical';
   if (CLOUD_VERIFIED_ADAPTERS.has(adapter)) {
-    return 'cloud_verified';
+    return credentials === null ? 'unverified' : 'cloud_verified';
   }
   return 'unverified';
 }
