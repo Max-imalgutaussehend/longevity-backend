@@ -1,14 +1,18 @@
+import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { eq, and } from 'drizzle-orm';
 import { Readable } from 'node:stream';
 import { db } from '../../db/client.js';
-import { sources, samples } from '../../db/schema.js';
+import { sources, samples, users } from '../../db/schema.js';
+import { env } from '../../env.js';
 import { parseAppleHealthXml } from '../../adapters/appleHealth.js';
 import { looksLikeZip, extractExportXml, AppleHealthZipError } from '../../adapters/appleHealthZip.js';
 import { parseHealthAutoExport } from '../../adapters/healthAutoExport.js';
 import { parseFhirBundle } from '../../adapters/fhir.js';
 import { requireUser } from '../helpers.js';
 import '../../types.js';
+
+const QUESTIONNAIRE_METRICS = new Set(['smoking', 'alcohol_units']);
 
 export async function sourcesImportRoutes(app: FastifyInstance) {
   app.post('/sources/apple-health/upload', async (req, reply) => {
@@ -73,12 +77,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
     return { inserted, sourceId: src.id };
   });
 
-  app.post('/sources/health-auto-export/webhook', async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const payload = req.body as any;
+  async function ingestHealthAutoExport(user: { id: string; birthDate: string }, payload: any) {
     const parsedSamples = parseHealthAutoExport(payload, { birthDate: user.birthDate });
 
     let [src] = await db.select().from(sources)
@@ -95,7 +94,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
         lastSyncAt: new Date(),
       }).returning();
     } else {
-      await db.update(sources).set({ adapter: 'health_auto_export', lastSyncAt: new Date() }).where(eq(sources.id, src.id));
+      await db.update(sources).set({ adapter: 'health_auto_export', lastSyncAt: new Date(), enabled: true }).where(eq(sources.id, src.id));
     }
 
     let inserted = 0;
@@ -111,7 +110,138 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       if (rows.length > 0) inserted++;
     }
 
-    return reply.status(200).send({ inserted, sourceId: src.id });
+    return { inserted, sourceId: src.id };
+  }
+
+  // Token-authenticated webhook (URL parameter :secret, no session cookie required)
+  app.post('/sources/health-auto-export/webhook/:secret', async (req, reply) => {
+    const { secret } = req.params as { secret: string };
+    if (!secret || secret.trim() === '') {
+      return reply.status(401).send({ title: 'Ungültiges Webhook-Secret.' });
+    }
+
+    const [user] = await db.select().from(users).where(eq(users.webhookSecret, secret.trim())).limit(1);
+    if (!user) {
+      return reply.status(401).send({ title: 'Ungültiges Webhook-Secret.' });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload = req.body as any;
+    const result = await ingestHealthAutoExport(user, payload);
+    return reply.status(200).send(result);
+  });
+
+  // Dual-mode webhook: accepts secret via query parameter, header x-webhook-secret, or session cookie
+  app.post('/sources/health-auto-export/webhook', async (req, reply) => {
+    const querySecret = (req.query as { secret?: string })?.secret;
+    const headerSecret = req.headers['x-webhook-secret'] as string | undefined;
+    const secret = querySecret || headerSecret;
+
+    if (secret) {
+      const [user] = await db.select().from(users).where(eq(users.webhookSecret, secret.trim())).limit(1);
+      if (!user) {
+        return reply.status(401).send({ title: 'Ungültiges Webhook-Secret.' });
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload = req.body as any;
+      const result = await ingestHealthAutoExport(user, payload);
+      return reply.status(200).send(result);
+    }
+
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload = req.body as any;
+    const result = await ingestHealthAutoExport(user, payload);
+    return reply.status(200).send(result);
+  });
+
+  // Retrieve current webhook secret and URL
+  app.get('/sources/health-auto-export/secret', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    return {
+      webhookSecret: user.webhookSecret,
+      webhookUrl: `${baseUrl}/api/sources/health-auto-export/webhook/${user.webhookSecret}`,
+    };
+  });
+
+  // Regenerate / rotate webhook secret
+  app.post('/sources/health-auto-export/secret/rotate', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const newSecret = crypto.randomBytes(32).toString('hex');
+    await db.update(users).set({ webhookSecret: newSecret }).where(eq(users.id, user.id));
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    return reply.status(200).send({
+      webhookSecret: newSecret,
+      webhookUrl: `${baseUrl}/api/sources/health-auto-export/webhook/${newSecret}`,
+    });
+  });
+
+  async function handleQuestionnaireSubmission(
+    user: { id: string },
+    body: { values?: Array<{ metric: string; value: number; unit: string; measuredAt?: string }> },
+    reply: any,
+  ) {
+    if (!Array.isArray(body.values) || body.values.length === 0) {
+      return reply.status(400).send({ title: 'values-Array erforderlich.' });
+    }
+
+    let [questSource] = await db.select().from(sources)
+      .where(and(eq(sources.userId, user.id), eq(sources.kind, 'questionnaire')))
+      .limit(1);
+
+    if (!questSource) {
+      [questSource] = await db.insert(sources).values({
+        userId: user.id,
+        kind: 'questionnaire',
+        adapter: 'manual',
+        enabled: true,
+        consentAt: new Date(),
+        lastSyncAt: new Date(),
+      }).returning();
+    } else {
+      await db.update(sources).set({ lastSyncAt: new Date(), enabled: true }).where(eq(sources.id, questSource.id));
+    }
+
+    const now = new Date();
+    const inserted: string[] = [];
+    for (const entry of body.values) {
+      if (!entry.metric || entry.value === undefined || !entry.unit) continue;
+      const measuredAt = entry.measuredAt ? new Date(entry.measuredAt) : now;
+      await db.insert(samples).values({
+        userId: user.id,
+        sourceId: questSource.id,
+        metric: entry.metric,
+        value: entry.value,
+        unit: entry.unit,
+        measuredAt,
+      }).onConflictDoUpdate({
+        target: [samples.userId, samples.metric, samples.measuredAt],
+        set: { value: entry.value, unit: entry.unit, sourceId: questSource.id },
+      });
+      inserted.push(entry.metric);
+    }
+
+    return reply.status(201).send({ inserted, sourceId: questSource.id });
+  }
+
+  app.post('/questionnaire', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    return handleQuestionnaireSubmission(user, req.body as any, reply);
+  });
+
+  app.post('/lifestyle', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    return handleQuestionnaireSubmission(user, req.body as any, reply);
   });
 
   app.post('/labs', async (req, reply) => {
@@ -140,21 +270,47 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, labSource.id));
     }
 
+    let questSource: typeof labSource | null = null;
     const now = new Date();
     const inserted: string[] = [];
     for (const entry of body.values) {
       if (!entry.metric || entry.value === undefined || !entry.unit) continue;
       const measuredAt = entry.measuredAt ? new Date(entry.measuredAt) : now;
+
+      let targetSourceId = labSource.id;
+      if (QUESTIONNAIRE_METRICS.has(entry.metric)) {
+        if (!questSource) {
+          const [existingQuest] = await db.select().from(sources)
+            .where(and(eq(sources.userId, user.id), eq(sources.kind, 'questionnaire')))
+            .limit(1);
+          if (existingQuest) {
+            questSource = existingQuest;
+            await db.update(sources).set({ lastSyncAt: new Date(), enabled: true }).where(eq(sources.id, questSource.id));
+          } else {
+            const [newQuest] = await db.insert(sources).values({
+              userId: user.id,
+              kind: 'questionnaire',
+              adapter: 'manual',
+              enabled: true,
+              consentAt: new Date(),
+              lastSyncAt: new Date(),
+            }).returning();
+            questSource = newQuest;
+          }
+        }
+        targetSourceId = questSource.id;
+      }
+
       await db.insert(samples).values({
         userId: user.id,
-        sourceId: labSource.id,
+        sourceId: targetSourceId,
         metric: entry.metric,
         value: entry.value,
         unit: entry.unit,
         measuredAt,
       }).onConflictDoUpdate({
         target: [samples.userId, samples.metric, samples.measuredAt],
-        set: { value: entry.value, unit: entry.unit },
+        set: { value: entry.value, unit: entry.unit, sourceId: targetSourceId },
       });
       inserted.push(entry.metric);
     }

@@ -221,9 +221,26 @@ paths['/sources/apple-health/upload'] = {
 };
 
 paths['/sources/health-auto-export/webhook'] = {
-  post: { operationId: 'healthAutoExportWebhook', tags: ['Sources'], summary: 'Health Auto Export JSON webhook',
+  post: { operationId: 'healthAutoExportWebhook', tags: ['Sources'], summary: 'Health Auto Export JSON webhook (cookie or query/header secret authenticated)',
     requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
-    responses: { 200: { description: 'Inserted count' }, ...auth401 } },
+    responses: { 200: { description: 'Inserted count' }, 401: { description: 'Invalid secret or unauthenticated' } } },
+};
+
+paths['/sources/health-auto-export/webhook/{secret}'] = {
+  post: { operationId: 'healthAutoExportWebhookWithSecret', tags: ['Sources'], summary: 'Health Auto Export background webhook authenticated via URL secret (no session cookie required)',
+    parameters: [{ name: 'secret', in: 'path', required: true, schema: { type: 'string' } }],
+    requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+    responses: { 200: { description: 'Inserted count' }, 401: { description: 'Invalid webhook secret' } } },
+};
+
+paths['/sources/health-auto-export/secret'] = {
+  get: { operationId: 'getHealthAutoExportSecret', tags: ['Sources'], summary: 'Get current Health Auto Export webhook secret and full URL',
+    responses: { 200: { description: 'Secret and webhook URL', content: { 'application/json': { schema: { type: 'object', required: ['webhookSecret', 'webhookUrl'], properties: { webhookSecret: { type: 'string' }, webhookUrl: { type: 'string' } } } } } }, ...auth401 } },
+};
+
+paths['/sources/health-auto-export/secret/rotate'] = {
+  post: { operationId: 'rotateHealthAutoExportSecret', tags: ['Sources'], summary: 'Regenerate and rotate Health Auto Export webhook secret',
+    responses: { 200: { description: 'New secret and webhook URL', content: { 'application/json': { schema: { type: 'object', required: ['webhookSecret', 'webhookUrl'], properties: { webhookSecret: { type: 'string' }, webhookUrl: { type: 'string' } } } } } }, ...auth401 } },
 };
 
 paths['/sources/{provider}/connect'] = {
@@ -298,6 +315,22 @@ paths['/sources/oura/sync'] = {
 paths['/sources/strava/sync'] = {
   post: { operationId: 'syncStrava', tags: ['Sources'], summary: 'Pull latest activities since last sync — strength_sessions + zone2_minutes',
     responses: { 200: { description: 'Inserted count' }, 404: { description: 'Not connected' }, ...auth401 } },
+};
+
+paths['/questionnaire'] = {
+  post: { operationId: 'postQuestionnaire', tags: ['Sources'], summary: 'Self-reported lifestyle/questionnaire values stored under questionnaire source',
+    requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['values'], properties: {
+      values: { type: 'array', items: { type: 'object', required: ['metric', 'value', 'unit'], properties: { metric: { type: 'string' }, value: { type: 'number' }, unit: { type: 'string' }, measuredAt: { type: 'string', format: 'date-time' } } } },
+    } } } } },
+    responses: { 201: { description: 'Inserted metrics' }, ...auth401 } },
+};
+
+paths['/lifestyle'] = {
+  post: { operationId: 'postLifestyle', tags: ['Sources'], summary: 'Alias for /questionnaire',
+    requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['values'], properties: {
+      values: { type: 'array', items: { type: 'object', required: ['metric', 'value', 'unit'], properties: { metric: { type: 'string' }, value: { type: 'number' }, unit: { type: 'string' }, measuredAt: { type: 'string', format: 'date-time' } } } },
+    } } } } },
+    responses: { 201: { description: 'Inserted metrics' }, ...auth401 } },
 };
 
 paths['/labs'] = {

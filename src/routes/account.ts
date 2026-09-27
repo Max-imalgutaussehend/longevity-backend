@@ -35,6 +35,7 @@ export async function accountRoutes(app: FastifyInstance) {
       emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
       healthDataConsentAt: user.healthDataConsentAt?.toISOString() ?? null,
       healthDataConsentVersion: user.healthDataConsentVersion ?? null,
+      webhookSecret: user.webhookSecret,
     };
   });
 

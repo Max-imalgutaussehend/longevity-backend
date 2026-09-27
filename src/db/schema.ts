@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { pgTable, uuid, text, boolean, timestamp, date, doublePrecision, bigserial, jsonb, integer, index, unique } from 'drizzle-orm/pg-core';
 
 export const ROLES = ['b2c', 'insurer_admin', 'insurer_staff', 'platform_admin'] as const;
@@ -24,6 +25,7 @@ export const users = pgTable('users', {
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   healthDataConsentAt: timestamp('health_data_consent_at', { withTimezone: true }),
   healthDataConsentVersion: text('health_data_consent_version'),
+  webhookSecret: text('webhook_secret').unique().notNull().$defaultFn(() => crypto.randomBytes(32).toString('hex')),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ orgIdx: index().on(t.organizationId) }));
 

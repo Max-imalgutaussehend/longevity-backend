@@ -24,11 +24,14 @@ export async function sourcesOverviewRoutes(app: FastifyInstance) {
       kind: s.kind,
       adapter: s.adapter,
       enabled: s.enabled,
-      connected: s.adapter === 'mock' ? true : (s.credentials !== null && s.syncStatus !== 'token_expired'),
-      syncStatus: s.syncStatus ?? (s.adapter === 'mock' ? 'ok' : (s.credentials ? 'ok' : null)),
+      connected: ['mock', 'manual', 'health_auto_export', 'upload', 'fhir'].includes(s.adapter)
+        ? true
+        : (s.credentials !== null && s.syncStatus !== 'token_expired'),
+      syncStatus: s.syncStatus ?? (['mock', 'manual', 'health_auto_export', 'upload', 'fhir'].includes(s.adapter) ? 'ok' : (s.credentials ? 'ok' : null)),
       syncError: s.syncError ?? null,
       lastSyncAt: s.lastSyncAt?.toISOString() ?? null,
       sampleCount: countMap.get(s.id) ?? 0,
+      webhookSecret: (s.kind === 'apple_health' || s.adapter === 'health_auto_export') ? user.webhookSecret : undefined,
     }));
   });
 
