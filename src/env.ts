@@ -29,6 +29,7 @@ const schema = z.object({
   OURA_CLIENT_SECRET: optionalString,
   STRAVA_CLIENT_ID: optionalString,
   STRAVA_CLIENT_SECRET: optionalString,
+  SENTRY_DSN_BACKEND: optionalString,
 });
 
 const parsed = schema.safeParse(process.env);
