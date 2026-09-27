@@ -1,0 +1,256 @@
+import type { FastifyInstance } from 'fastify';
+import { eq } from 'drizzle-orm';
+import { hash, verify as argon2Verify } from '@node-rs/argon2';
+import { env } from '../env.js';
+import { db } from '../db/client.js';
+import { users, organizations } from '../db/schema.js';
+import { isWeakPassword } from '../lib/weakPasswords.js';
+import { issueEmailToken, consumeEmailToken } from '../lib/emailTokens.js';
+import { sendMail } from '../lib/mail.js';
+import { verifyEmailTemplate, passwordResetTemplate } from '../lib/emailTemplates.js';
+import { requireUser } from './helpers.js';
+import '../types.js';
+
+export async function authRoutes(app: FastifyInstance) {
+  app.post('/register', async (req, reply) => {
+    const body = req.body as { email?: string; password?: string; birthDate?: string; sex?: string; displayName?: string };
+    const { email, password, birthDate, sex, displayName } = body;
+
+    if (!email || !password || !birthDate || !sex) {
+      return reply.status(400).send({ title: 'Pflichtfelder fehlen.' });
+    }
+    if (password.length < 10) {
+      return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
+    }
+    if (isWeakPassword(password)) {
+      return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
+    }
+    if (sex !== 'm' && sex !== 'f') {
+      return reply.status(400).send({ title: 'Ungültiges Geschlecht.' });
+    }
+
+    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+    if (existing.length > 0) {
+      return reply.status(409).send({ title: 'E-Mail bereits vergeben.' });
+    }
+
+    const passwordHash = await hash(password);
+    const [user] = await db.insert(users).values({
+      email,
+      passwordHash,
+      birthDate,
+      sex,
+      displayName: displayName ?? null,
+    }).returning();
+
+    req.session.userId = user.id;
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const token = await issueEmailToken(user.id, 'verify_email');
+    const verifyUrl = `${baseUrl}/verify-email/${token}`;
+    try {
+      await sendMail({ to: user.email, ...verifyEmailTemplate(verifyUrl) });
+    } catch (err) {
+      req.log.error(err, 'Verifikations-E-Mail konnte nicht gesendet werden');
+    }
+
+    return reply.status(201).send({ id: user.id, email: user.email });
+  });
+
+  app.post('/verify-email', async (req, reply) => {
+    const { token } = req.body as { token?: string };
+    if (!token) return reply.status(400).send({ title: 'Token fehlt.' });
+
+    const result = await consumeEmailToken(token, 'verify_email');
+    if (!result.ok) {
+      const reasonTitle = result.reason === 'expired'
+        ? 'Der Verifikationslink ist abgelaufen.'
+        : result.reason === 'used'
+        ? 'Der Verifikationslink wurde bereits verwendet.'
+        : 'Ungültiger Verifikationslink.';
+      return reply.status(400).send({ title: reasonTitle });
+    }
+
+    await db.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.id, result.userId));
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/resend-verification', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (user.emailVerifiedAt) return reply.status(400).send({ title: 'E-Mail ist bereits bestätigt.' });
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const token = await issueEmailToken(user.id, 'verify_email');
+    const verifyUrl = `${baseUrl}/verify-email/${token}`;
+    await sendMail({ to: user.email, ...verifyEmailTemplate(verifyUrl) });
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/request-password-reset', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
+    const { email } = req.body as { email?: string };
+    if (!email) return reply.status(400).send({ title: 'E-Mail erforderlich.' });
+
+    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    if (user) {
+      const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+      const token = await issueEmailToken(user.id, 'reset_password');
+      const resetUrl = `${baseUrl}/reset-password/${token}`;
+      await sendMail({ to: user.email, ...passwordResetTemplate(resetUrl) });
+    }
+
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/reset-password', async (req, reply) => {
+    const { token, password } = req.body as { token?: string; password?: string };
+    if (!token || !password) return reply.status(400).send({ title: 'Token und Passwort erforderlich.' });
+    if (password.length < 10) return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
+    if (isWeakPassword(password)) return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
+
+    const result = await consumeEmailToken(token, 'reset_password');
+    if (!result.ok) {
+      const reasonTitle = result.reason === 'expired'
+        ? 'Der Link zum Zurücksetzen ist abgelaufen.'
+        : result.reason === 'used'
+        ? 'Dieser Link wurde bereits verwendet.'
+        : 'Ungültiger Link.';
+      return reply.status(400).send({ title: reasonTitle });
+    }
+
+    const passwordHash = await hash(password);
+    await db.update(users).set({ passwordHash }).where(eq(users.id, result.userId));
+
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/accept-invite', async (req, reply) => {
+    const { token, password } = req.body as { token?: string; password?: string };
+    if (!token || !password) return reply.status(400).send({ title: 'Token und Passwort erforderlich.' });
+    if (password.length < 10) return reply.status(400).send({ title: 'Passwort muss mindestens 10 Zeichen haben.' });
+    if (isWeakPassword(password)) return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
+
+    const result = await consumeEmailToken(token, 'insurer_invite');
+    if (!result.ok) {
+      const reasonTitle = result.reason === 'expired'
+        ? 'Die Einladung ist abgelaufen.'
+        : result.reason === 'used'
+        ? 'Diese Einladung wurde bereits verwendet.'
+        : 'Ungültiger Einladungslink.';
+      return reply.status(400).send({ title: reasonTitle });
+    }
+
+    const passwordHash = await hash(password);
+    const [user] = await db.update(users)
+      .set({ passwordHash, emailVerifiedAt: new Date() })
+      .where(eq(users.id, result.userId))
+      .returning();
+
+    if (user.organizationId) {
+      await db.update(organizations).set({ status: 'active' }).where(eq(organizations.id, user.organizationId));
+    }
+
+    req.session.userId = user.id;
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/login', {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ title: 'Zu viele Login-Versuche. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
+    const { email, password } = req.body as { email?: string; password?: string };
+    if (!email || !password) {
+      return reply.status(400).send({ title: 'E-Mail und Passwort erforderlich.' });
+    }
+
+    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    if (!user) return reply.status(401).send({ title: 'E-Mail oder Passwort falsch.' });
+
+    const ok = await argon2Verify(user.passwordHash, password);
+    if (!ok) return reply.status(401).send({ title: 'E-Mail oder Passwort falsch.' });
+
+    req.session.userId = user.id;
+    return reply.status(200).send({ ok: true });
+  });
+
+  app.post('/logout', async (req, reply) => {
+    await req.session.destroy();
+    return reply.status(204).send();
+  });
+
+  app.post('/google/url', async (req) => {
+    const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
+    if (!googleClientId) return { url: null };
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const redirectUri = (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/auth/google/callback`;
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id', googleClientId);
+    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', 'openid email profile');
+    url.searchParams.set('prompt', 'select_account');
+    return { url: url.toString() };
+  });
+
+  app.get('/google/callback', async (req, reply) => {
+    const { code } = req.query as { code?: string };
+    const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
+    const googleClientSecret = env.GOOGLE_FIT_CLIENT_SECRET ?? env.GOOGLE_HEALTH_CLIENT_SECRET;
+    if (!googleClientId || !googleClientSecret || !code) {
+      return reply.redirect('/login?error=google_auth_failed');
+    }
+
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const redirectUri = (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/auth/google/callback`;
+
+    try {
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          client_id: googleClientId,
+          client_secret: googleClientSecret,
+          redirect_uri: redirectUri,
+        }),
+      });
+      if (!tokenRes.ok) throw new Error('Token exchange failed');
+      const tokenData = await tokenRes.json() as { access_token: string };
+
+      const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      if (!userRes.ok) throw new Error('UserInfo request failed');
+      const userInfo = await userRes.json() as { email?: string; name?: string };
+
+      if (!userInfo.email) {
+        return reply.redirect('/login?error=no_email');
+      }
+
+      const [existingUser] = await db.select().from(users).where(eq(users.email, userInfo.email)).limit(1);
+      if (existingUser) {
+        req.session.userId = existingUser.id;
+        return reply.redirect('/dashboard');
+      }
+
+      return reply.redirect(`/register?googleEmail=${encodeURIComponent(userInfo.email)}&name=${encodeURIComponent(userInfo.name ?? '')}`);
+    } catch (err) {
+      req.log.error(err, 'Google Sign-In failed');
+      return reply.redirect('/login?error=google_auth_failed');
+    }
+  });
+}
