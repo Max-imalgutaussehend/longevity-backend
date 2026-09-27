@@ -7,7 +7,7 @@ import { sources, samples, users } from '../../db/schema.js';
 import { env } from '../../env.js';
 import { parseAppleHealthXml } from '../../adapters/appleHealth.js';
 import { looksLikeZip, extractExportXml, AppleHealthZipError } from '../../adapters/appleHealthZip.js';
-import { parseHealthAutoExport } from '../../adapters/healthAutoExport.js';
+import { parseHealthAutoExport, type HaePayload } from '../../adapters/healthAutoExport.js';
 import { parseFhirBundle } from '../../adapters/fhir.js';
 import { requireUser } from '../helpers.js';
 import '../../types.js';
@@ -77,7 +77,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
     return { inserted, sourceId: src.id };
   });
 
-  async function ingestHealthAutoExport(user: { id: string; birthDate: string }, payload: unknown) {
+  async function ingestHealthAutoExport(user: { id: string; birthDate: string }, payload: HaePayload) {
     const parsedSamples = parseHealthAutoExport(payload, { birthDate: user.birthDate });
 
     let [src] = await db.select().from(sources)
@@ -125,8 +125,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       return reply.status(401).send({ title: 'Ungültiges Webhook-Secret.' });
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const payload = req.body as any;
+    const payload = req.body as HaePayload;
     const result = await ingestHealthAutoExport(user, payload);
     return reply.status(200).send(result);
   });
@@ -142,8 +141,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       if (!user) {
         return reply.status(401).send({ title: 'Ungültiges Webhook-Secret.' });
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const payload = req.body as any;
+      const payload = req.body as HaePayload;
       const result = await ingestHealthAutoExport(user, payload);
       return reply.status(200).send(result);
     }
@@ -151,8 +149,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
     const user = await requireUser(req, reply);
     if (!user) return;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const payload = req.body as any;
+    const payload = req.body as HaePayload;
     const result = await ingestHealthAutoExport(user, payload);
     return reply.status(200).send(result);
   });

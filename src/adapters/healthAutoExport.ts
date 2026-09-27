@@ -25,7 +25,7 @@ interface HaeMetric {
   data: HaeDataPoint[];
 }
 
-type HaePayload = (HaeMetric[] | { metrics: HaeMetric[] }) & { workouts?: HaeWorkout[] };
+export type HaePayload = (HaeMetric[] | { metrics: HaeMetric[] }) & { workouts?: HaeWorkout[] };
 
 const STRENGTH_WORKOUT_NAMES = new Set(['Functional Strength Training', 'Traditional Strength Training', 'Cross Training']);
 
