@@ -26,15 +26,14 @@ describe('CSRF Protection & Secure Cookie Configuration (#103)', () => {
     await app.ready();
 
     const { sql } = await import('drizzle-orm');
-    const { randomUUID, randomBytes } = await import('node:crypto');
+    const { randomUUID } = await import('node:crypto');
     const userId = randomUUID();
     const email = `csrf-test-${Date.now()}@example.com`;
     const pwHash = await hashPassword('SecureTestPassword123!');
-    const secret = randomBytes(32).toString('hex');
 
     await db.execute(sql`
-      INSERT INTO users (id, email, password_hash, birth_date, sex, email_verified_at, webhook_secret)
-      VALUES (${userId}, ${email}, ${pwHash}, '1992-05-15', 'm', NOW(), ${secret})
+      INSERT INTO users (id, email, password_hash, birth_date, sex, email_verified_at)
+      VALUES (${userId}, ${email}, ${pwHash}, '1992-05-15', 'm', NOW())
       ON CONFLICT (id) DO NOTHING
     `);
 
