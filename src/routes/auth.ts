@@ -15,7 +15,7 @@ import { setCsrfCookies, clearCsrfCookies } from '../lib/csrf.js';
 import '../types.js';
 
 export const registerSchema = z.object({
-  email: z.string().email('Ungültige E-Mail-Adresse.'),
+  email: z.string().trim().toLowerCase().email('Ungültige E-Mail-Adresse.'),
   password: passwordSchema,
   birthDate: z.string().refine((val) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) return false;
@@ -89,13 +89,15 @@ export async function authRoutes(app: FastifyInstance) {
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const token = await issueEmailToken(user.id, 'verify_email');
     const verifyUrl = `${baseUrl}/verify-email/${token}`;
+    let mailSent = false;
     try {
       await sendMail({ to: user.email, ...verifyEmailTemplate(verifyUrl) });
+      mailSent = true;
     } catch (err) {
       req.log.error(err, 'Verifikations-E-Mail konnte nicht gesendet werden');
     }
 
-    return reply.status(201).send({ id: user.id, email: user.email });
+    return reply.status(201).send({ id: user.id, email: user.email, mailSent });
   });
 
   app.post('/verify-email', async (req, reply) => {
@@ -124,7 +126,12 @@ export async function authRoutes(app: FastifyInstance) {
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const token = await issueEmailToken(user.id, 'verify_email');
     const verifyUrl = `${baseUrl}/verify-email/${token}`;
-    await sendMail({ to: user.email, ...verifyEmailTemplate(verifyUrl) });
+    try {
+      await sendMail({ to: user.email, ...verifyEmailTemplate(verifyUrl) });
+    } catch (err) {
+      req.log.error(err, 'Verifikations-E-Mail (resend) konnte nicht gesendet werden');
+      return reply.status(503).send({ title: 'E-Mail konnte nicht gesendet werden. Bitte versuche es später erneut.' });
+    }
     return reply.status(200).send({ ok: true });
   });
 
@@ -140,12 +147,17 @@ export async function authRoutes(app: FastifyInstance) {
     const { email } = req.body as { email?: string };
     if (!email) return reply.status(400).send({ title: 'E-Mail erforderlich.' });
 
-    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    const cleanEmail = email.trim().toLowerCase();
+    const [user] = await db.select().from(users).where(eq(users.email, cleanEmail)).limit(1);
     if (user) {
       const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
       const token = await issueEmailToken(user.id, 'reset_password');
       const resetUrl = `${baseUrl}/reset-password/${token}`;
-      await sendMail({ to: user.email, ...passwordResetTemplate(resetUrl) });
+      try {
+        await sendMail({ to: user.email, ...passwordResetTemplate(resetUrl) });
+      } catch (err) {
+        req.log.error(err, 'Passwort-Reset-E-Mail konnte nicht gesendet werden');
+      }
     }
 
     return reply.status(200).send({ ok: true });
@@ -224,7 +236,8 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(400).send({ title: 'E-Mail und Passwort erforderlich.' });
     }
 
-    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    const cleanEmail = email.trim().toLowerCase();
+    const [user] = await db.select().from(users).where(eq(users.email, cleanEmail)).limit(1);
     if (!user) return reply.status(401).send({ title: 'E-Mail oder Passwort falsch.' });
 
     const ok = await verifyPassword(user.passwordHash, password);

@@ -99,6 +99,13 @@
       "when": 1790610000000,
       "tag": "0013_careful_webhook_secret_default",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790619515237,
+      "tag": "0014_email_normalization",
+      "breakpoints": true
     }
   ]
 }
