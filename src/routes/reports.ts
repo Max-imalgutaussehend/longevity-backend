@@ -19,6 +19,29 @@ interface WeeklyReportResult {
   streakDays: number;
 }
 
+const WEARABLE_SOURCE_KINDS = new Set(['apple_health', 'oura', 'withings', 'google_fit', 'strava', 'health_auto_export']);
+
+// Counts consecutive days (ending today) that have at least one wearable
+// sample — not a count of score snapshot rows, which only reflects how
+// often the user opened the dashboard.
+function computeWearableStreakDays(samples: Array<{ measuredAt: string; sourceKind: string }>, now: Date): number {
+  const daysWithWearableData = new Set(
+    samples
+      .filter((s) => WEARABLE_SOURCE_KINDS.has(s.sourceKind))
+      .map((s) => s.measuredAt.slice(0, 10)),
+  );
+
+  let streak = 0;
+  const cursor = new Date(now);
+  for (;;) {
+    const dayStr = cursor.toISOString().slice(0, 10);
+    if (!daysWithWearableData.has(dayStr)) break;
+    streak += 1;
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+  return streak;
+}
+
 async function computeWeeklyReport(user: { id: string; birthDate: string; sex: string }): Promise<WeeklyReportResult> {
   const now = new Date();
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -31,8 +54,10 @@ async function computeWeeklyReport(user: { id: string; birthDate: string; sex: s
     .where(and(eq(scoreSnapshots.userId, user.id), gte(scoreSnapshots.computedFor, weekAgo)))
     .orderBy(asc(scoreSnapshots.computedFor));
 
+  const userSamples = await getUserSamples(user.id);
+  const streakDays = computeWearableStreakDays(userSamples, now);
+
   if (rows.length < 2) {
-    const userSamples = await getUserSamples(user.id);
     const current = computeScore({
       profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
       samples: userSamples,
@@ -45,7 +70,7 @@ async function computeWeeklyReport(user: { id: string; birthDate: string; sex: s
       delta: 0,
       bestMetric: 'vo2max',
       worstMetric: 'smoking',
-      streakDays: rows.length,
+      streakDays,
     };
   }
 
@@ -70,7 +95,7 @@ async function computeWeeklyReport(user: { id: string; birthDate: string; sex: s
     delta: Math.round((last.score - first.score) * 10) / 10,
     bestMetric,
     worstMetric,
-    streakDays: rows.length,
+    streakDays,
   };
 }
 

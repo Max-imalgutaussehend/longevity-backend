@@ -67,6 +67,7 @@ export async function insurerRoutes(app: FastifyInstance) {
 
     return {
       organizationName: org?.name ?? null,
+      joinCode: org?.joinCode ?? null,
       activeMemberCount,
       averageScore,
       averageCoverage,
