@@ -98,4 +98,24 @@ describe.skipIf(!HAS_DB)('GET /api/account/export — integration', () => {
     const remainingSources = await db.select().from(tables.sources).where(eq(tables.sources.userId, tempUser.id));
     expect(remainingSources).toHaveLength(0);
   });
+
+  it('purges all user sessions on account deletion (multi-device)', async () => {
+    const { eq } = await import('drizzle-orm');
+
+    const [tempUser] = await db.insert(tables.users).values({
+      email: `export-session-delete-test-${Date.now()}@test.local`,
+      passwordHash: 'x', birthDate: '1990-01-01', sex: 'm',
+    }).returning();
+
+    await db.insert(tables.sessions).values([
+      { id: `sess-1-${Date.now()}`, userId: tempUser.id, expiresAt: new Date(Date.now() + 86400000) },
+      { id: `sess-2-${Date.now()}`, userId: tempUser.id, expiresAt: new Date(Date.now() + 86400000) },
+    ]);
+
+    await db.delete(tables.sessions).where(eq(tables.sessions.userId, tempUser.id));
+    await db.delete(tables.users).where(eq(tables.users.id, tempUser.id));
+
+    const remainingSessions = await db.select().from(tables.sessions).where(eq(tables.sessions.userId, tempUser.id));
+    expect(remainingSessions).toHaveLength(0);
+  });
 });

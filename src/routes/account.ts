@@ -8,6 +8,7 @@ import {
   organizations,
   sources,
   samples,
+  sessions,
   scoreSnapshots,
   shareTokens,
   healthDataConsents,
@@ -207,6 +208,18 @@ export async function accountRoutes(app: FastifyInstance) {
     return { ok: true, revokedAt: now.toISOString() };
   });
 
+  /**
+   * DELETE /account — DSGVO Art. 17 Recht auf Löschung
+   *
+   * Cascade via DB FK (onDelete: 'cascade'):
+   *   emailTokens, sources, samples, scoreSnapshots, shareTokens,
+   *   healthDataConsents, insurerRequests
+   *
+   * Explicitly handled here:
+   *   sessions (no FK cascade — purge all active sessions for this user)
+   *
+   * Requires password confirmation to prevent accidental / CSRF-triggered deletion.
+   */
   app.delete('/account', async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
@@ -219,7 +232,13 @@ export async function accountRoutes(app: FastifyInstance) {
     const ok = await verifyPassword(user.passwordHash, body.password);
     if (!ok) return reply.status(401).send({ title: 'Falsches Passwort.' });
 
+    // Destroy the current session first so the cookie is cleared
     await req.session.destroy();
+
+    // Purge ALL sessions for this user (covers multi-device logins)
+    await db.delete(sessions).where(eq(sessions.userId, user.id));
+
+    // Deleting the user row triggers cascade deletion of all health data
     await db.delete(users).where(eq(users.id, user.id));
     return reply.status(204).send();
   });
