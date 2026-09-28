@@ -17,7 +17,9 @@ describe('Health Insurer Selection & KVNR Membership Verification (#53)', () => 
   let activeOrgId: string;
   let pendingOrgId: string;
   let cookieUserA: string;
+  let csrfTokenUserA: string;
   let cookieUserB: string;
+  let csrfTokenUserB: string;
 
   beforeAll(async () => {
     const { buildApp } = await import('../app.js');
@@ -58,7 +60,12 @@ describe('Health Insurer Selection & KVNR Membership Verification (#53)', () => 
       },
     });
     expect(regResA.statusCode).toBe(201);
-    cookieUserA = regResA.headers['set-cookie'] as string;
+    const setCookieA = regResA.headers['set-cookie'];
+    const cookieArrayA = Array.isArray(setCookieA) ? setCookieA : [setCookieA as string];
+    cookieUserA = cookieArrayA.map((c) => c.split(';')[0]).join('; ');
+    const xsrfCookieA = cookieArrayA.find((c) => c.startsWith('XSRF-TOKEN='));
+    csrfTokenUserA = xsrfCookieA ? xsrfCookieA.split(';')[0].replace('XSRF-TOKEN=', '') : '';
+
     const [uA] = await db.select().from(schema.users).where(eq(schema.users.email, emailA)).limit(1);
     userAId = uA.id;
 
@@ -75,7 +82,12 @@ describe('Health Insurer Selection & KVNR Membership Verification (#53)', () => 
       },
     });
     expect(regResB.statusCode).toBe(201);
-    cookieUserB = regResB.headers['set-cookie'] as string;
+    const setCookieB = regResB.headers['set-cookie'];
+    const cookieArrayB = Array.isArray(setCookieB) ? setCookieB : [setCookieB as string];
+    cookieUserB = cookieArrayB.map((c) => c.split(';')[0]).join('; ');
+    const xsrfCookieB = cookieArrayB.find((c) => c.startsWith('XSRF-TOKEN='));
+    csrfTokenUserB = xsrfCookieB ? xsrfCookieB.split(';')[0].replace('XSRF-TOKEN=', '') : '';
+
     const [uB] = await db.select().from(schema.users).where(eq(schema.users.email, emailB)).limit(1);
     userBId = uB.id;
   }, 30000);
@@ -112,7 +124,7 @@ describe('Health Insurer Selection & KVNR Membership Verification (#53)', () => 
       const res = await app.inject({
         method: 'POST',
         url: '/api/organizations/join',
-        headers: { cookie: cookieUserA },
+        headers: { cookie: cookieUserA, 'x-csrf-token': csrfTokenUserA },
         payload: {},
       });
       expect(res.statusCode).toBe(400);
@@ -122,7 +134,7 @@ describe('Health Insurer Selection & KVNR Membership Verification (#53)', () => 
       const res = await app.inject({
         method: 'POST',
         url: '/api/organizations/join',
-        headers: { cookie: cookieUserA },
+        headers: { cookie: cookieUserA, 'x-csrf-token': csrfTokenUserA },
         payload: {
           organizationId: activeOrgId,
           kvnr: '1234567890',
@@ -138,7 +150,7 @@ describe('Health Insurer Selection & KVNR Membership Verification (#53)', () => 
       const res = await app.inject({
         method: 'POST',
         url: '/api/organizations/join',
-        headers: { cookie: cookieUserA },
+        headers: { cookie: cookieUserA, 'x-csrf-token': csrfTokenUserA },
         payload: {
           organizationId: activeOrgId,
           kvnr: 'Z629410048',
@@ -153,7 +165,7 @@ describe('Health Insurer Selection & KVNR Membership Verification (#53)', () => 
       const res = await app.inject({
         method: 'POST',
         url: '/api/organizations/join',
-        headers: { cookie: cookieUserA },
+        headers: { cookie: cookieUserA, 'x-csrf-token': csrfTokenUserA },
         payload: {
           organizationId: pendingOrgId,
           kvnr: 'Z629410049',
@@ -166,7 +178,7 @@ describe('Health Insurer Selection & KVNR Membership Verification (#53)', () => 
       const res = await app.inject({
         method: 'POST',
         url: '/api/organizations/join',
-        headers: { cookie: cookieUserA },
+        headers: { cookie: cookieUserA, 'x-csrf-token': csrfTokenUserA },
         payload: {
           organizationId: activeOrgId,
           kvnr: '  z629410049  ', // test lowercase and whitespace normalization
@@ -210,7 +222,7 @@ describe('Health Insurer Selection & KVNR Membership Verification (#53)', () => 
       const res = await app.inject({
         method: 'POST',
         url: '/api/organizations/join',
-        headers: { cookie: cookieUserB },
+        headers: { cookie: cookieUserB, 'x-csrf-token': csrfTokenUserB },
         payload: {
           organizationId: activeOrgId,
           kvnr: 'Z629410049', // Same KVNR already used by User A
@@ -226,7 +238,7 @@ describe('Health Insurer Selection & KVNR Membership Verification (#53)', () => 
       const leaveRes = await app.inject({
         method: 'POST',
         url: '/api/organizations/leave',
-        headers: { cookie: cookieUserA },
+        headers: { cookie: cookieUserA, 'x-csrf-token': csrfTokenUserA },
       });
       expect(leaveRes.statusCode).toBe(204);
 
