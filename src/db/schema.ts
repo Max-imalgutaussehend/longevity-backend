@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { pgTable, uuid, text, boolean, timestamp, date, doublePrecision, bigserial, jsonb, integer, index, unique } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { pgTable, uuid, text, boolean, timestamp, date, doublePrecision, bigserial, jsonb, integer, index, unique, uniqueIndex } from 'drizzle-orm/pg-core';
 
 export const ROLES = ['b2c', 'insurer_admin', 'insurer_staff', 'platform_admin'] as const;
 export type Role = typeof ROLES[number];
@@ -135,6 +136,37 @@ export const partnerOffers = pgTable('partner_offers', {
   isDemo: boolean('is_demo').notNull().default(true),
   sortOrder: integer('sort_order').notNull().default(0),
 }, (t) => ({ orgIdx: index().on(t.organizationId) }));
+
+export const BENEFIT_CLAIM_STATUSES = ['submitted', 'accepted', 'rejected'] as const;
+export type BenefitClaimStatus = typeof BENEFIT_CLAIM_STATUSES[number];
+
+// A direct in-portal submission of a qualified partner offer to its issuing
+// insurer organization (issue #87) — replaces manual link-sharing for offers
+// that have an organizationId. Snapshots the qualifying band/proof details
+// at submission time so a later score change can't retroactively alter what
+// was actually submitted and reviewed.
+export const benefitClaims = pgTable('benefit_claims', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  offerId: uuid('offer_id').notNull().references(() => partnerOffers.id, { onDelete: 'cascade' }),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  shareTokenId: text('share_token_id').notNull().references(() => shareTokens.id, { onDelete: 'restrict' }),
+  bandLow: integer('band_low').notNull(),
+  bandHigh: integer('band_high').notNull(),
+  status: text('status').notNull().$type<BenefitClaimStatus>().default('submitted'),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  decidedBy: uuid('decided_by').references(() => users.id),
+}, (t) => ({
+  userIdx: index().on(t.userId),
+  orgIdx: index().on(t.organizationId),
+  // One active (non-rejected) claim per user+offer — resubmission after a
+  // rejection is allowed (partial index excludes rejected rows), but not
+  // while a claim is pending or accepted.
+  uniqActiveClaim: uniqueIndex('benefit_claims_active_unique')
+    .on(t.userId, t.offerId)
+    .where(sql`${t.status} != 'rejected'`),
+}));
 
 export const healthDataConsents = pgTable('health_data_consents', {
   id: uuid('id').primaryKey().defaultRandom(),
