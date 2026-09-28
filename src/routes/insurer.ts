@@ -86,10 +86,12 @@ export async function insurerRoutes(app: FastifyInstance) {
 
     let band = { low: 0, high: 100 };
     let snapshots: SnapshotHistoryItem[] = [];
+    let userOrganizationId: string | null = null;
     const claimByOfferId = new Map<string, { status: string; submittedAt: Date }>();
     if (userId) {
       const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
       if (user) {
+        userOrganizationId = user.organizationId;
         const userSamples = await getUserSamples(userId);
         const score = computeScore({
           profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
@@ -120,6 +122,10 @@ export async function insurerRoutes(app: FastifyInstance) {
 
     return rows
       .filter(o => (!o.validFrom || o.validFrom <= now) && (!o.validUntil || o.validUntil >= now))
+      // A members-only offer is exclusive to its issuing organization's own
+      // verified members (issue #84) — everyone else must not even see it,
+      // regardless of whether their score would otherwise qualify.
+      .filter(o => !o.organizationId || !o.membersOnly || o.organizationId === userOrganizationId)
       .map(o => {
         const holding = evaluateHoldingPeriod({
           currentBand: band,
@@ -139,6 +145,7 @@ export async function insurerRoutes(app: FastifyInstance) {
           minMonths: o.minMonths ?? null,
           valueLabel: o.valueLabel,
           isDemo: o.isDemo,
+          membersOnly: o.membersOnly,
           qualified: holding.qualified,
           daysHeld: holding.daysHeld,
           daysRemaining: holding.daysRemaining,
@@ -169,6 +176,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       valueLabel: o.valueLabel,
       validFrom: o.validFrom?.toISOString() ?? null,
       validUntil: o.validUntil?.toISOString() ?? null,
+      membersOnly: o.membersOnly,
     }));
   });
 
@@ -185,8 +193,9 @@ export async function insurerRoutes(app: FastifyInstance) {
       valueLabel?: string;
       validFrom?: string;
       validUntil?: string;
+      membersOnly?: boolean;
     };
-    const { title, description, minBand, minMonths, valueLabel, validFrom, validUntil } = body;
+    const { title, description, minBand, minMonths, valueLabel, validFrom, validUntil, membersOnly } = body;
 
     if (!title || !description || minBand === undefined || !valueLabel) {
       return reply.status(400).send({ title: 'Pflichtfelder fehlen.' });
@@ -211,6 +220,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       validFrom: validFrom ? new Date(validFrom) : null,
       validUntil: validUntil ? new Date(validUntil) : null,
       isDemo: false,
+      membersOnly: membersOnly ?? true,
     }).returning();
 
     return reply.status(201).send({
@@ -222,6 +232,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       valueLabel: offer.valueLabel,
       validFrom: offer.validFrom?.toISOString() ?? null,
       validUntil: offer.validUntil?.toISOString() ?? null,
+      membersOnly: offer.membersOnly,
     });
   });
 
@@ -239,6 +250,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       valueLabel?: string;
       validFrom?: string | null;
       validUntil?: string | null;
+      membersOnly?: boolean;
     };
 
     if (body.minBand !== undefined && (body.minBand < 0 || body.minBand > 100)) {
@@ -261,6 +273,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       ...(body.valueLabel !== undefined && { valueLabel: body.valueLabel }),
       ...(body.validFrom !== undefined && { validFrom: body.validFrom ? new Date(body.validFrom) : null }),
       ...(body.validUntil !== undefined && { validUntil: body.validUntil ? new Date(body.validUntil) : null }),
+      ...(body.membersOnly !== undefined && { membersOnly: body.membersOnly }),
     }).where(eq(partnerOffers.id, id)).returning();
 
     return {
@@ -272,6 +285,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       valueLabel: updated.valueLabel,
       validFrom: updated.validFrom?.toISOString() ?? null,
       validUntil: updated.validUntil?.toISOString() ?? null,
+      membersOnly: updated.membersOnly,
     };
   });
 
@@ -295,6 +309,9 @@ export async function insurerRoutes(app: FastifyInstance) {
     if (!offer) return reply.status(404).send({ title: 'Angebot nicht gefunden.' });
     if (!offer.organizationId) {
       return reply.status(400).send({ title: 'Dieses Angebot unterstützt keine direkte Einreichung.' });
+    }
+    if (offer.membersOnly && offer.organizationId !== user.organizationId) {
+      return reply.status(403).send({ title: 'Dieses Angebot ist nur für Mitglieder der ausstellenden Krankenkasse verfügbar.' });
     }
 
     const now = new Date();

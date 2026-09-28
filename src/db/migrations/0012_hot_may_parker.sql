@@ -1,0 +1,1 @@
+ALTER TABLE "partner_offers" ADD COLUMN "members_only" boolean DEFAULT true NOT NULL;

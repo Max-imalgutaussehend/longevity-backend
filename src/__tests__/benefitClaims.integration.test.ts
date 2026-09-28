@@ -140,6 +140,11 @@ describe.skipIf(!HAS_DB)('Issue #87: direct benefit claim submission', () => {
     b2cCsrfToken = extractCsrfToken(regRes.headers['set-cookie']);
     const [b2cUser] = await db.select().from(tables.users).where(eq(tables.users.email, b2cEmail));
     b2cUserId = b2cUser.id;
+    // Verified membership is required for a members-only offer (issue #84);
+    // this suite tests the claim-submission flow itself, not membership gating.
+    await db.update(tables.users)
+      .set({ organizationId: orgId, organizationVerifiedAt: new Date() })
+      .where(eq(tables.users.id, b2cUserId));
   });
 
   afterAll(async () => {

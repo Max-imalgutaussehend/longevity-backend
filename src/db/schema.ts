@@ -135,6 +135,11 @@ export const partnerOffers = pgTable('partner_offers', {
   validUntil: timestamp('valid_until', { withTimezone: true }),
   isDemo: boolean('is_demo').notNull().default(true),
   sortOrder: integer('sort_order').notNull().default(0),
+  // When an offer belongs to an organization (issue #84), the insurer chooses
+  // whether it's exclusive to their own verified members or visible to all
+  // users as a general promotion. Meaningless for organization-less offers,
+  // which are always visible to everyone regardless of this flag.
+  membersOnly: boolean('members_only').notNull().default(true),
 }, (t) => ({ orgIdx: index().on(t.organizationId) }));
 
 export const BENEFIT_CLAIM_STATUSES = ['submitted', 'accepted', 'rejected'] as const;

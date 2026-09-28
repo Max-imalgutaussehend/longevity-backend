@@ -350,6 +350,9 @@
             ],
             "format": "uuid"
           },
+          "membersOnly": {
+            "type": "boolean"
+          },
           "claimStatus": {
             "type": [
               "string",
@@ -1204,6 +1207,10 @@
                   "validUntil": {
                     "type": "string",
                     "format": "date-time"
+                  },
+                  "membersOnly": {
+                    "type": "boolean",
+                    "description": "Exclusive to the organization's own verified members (default true) vs. visible to all users."
                   }
                 }
               }
@@ -1282,6 +1289,9 @@
                     "type": "string",
                     "format": "date-time",
                     "nullable": true
+                  },
+                  "membersOnly": {
+                    "type": "boolean"
                   }
                 }
               }
