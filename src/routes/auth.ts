@@ -41,7 +41,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/register', {
     config: {
       rateLimit: {
-        max: env.NODE_ENV === 'test' ? 50 : 5,
+        max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 200 : 5,
         timeWindow: '15 minutes',
         errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Registrierungsversuche. Bitte in 15 Minuten erneut versuchen.' }),
       },
@@ -129,7 +129,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/request-password-reset', {
     config: {
       rateLimit: {
-        max: 5,
+        max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 200 : 5,
         timeWindow: '15 minutes',
         errorResponseBuilder: () => ({ title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
       },
@@ -211,7 +211,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/login', {
     config: {
       rateLimit: {
-        max: 10,
+        max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 200 : 10,
         timeWindow: '15 minutes',
         errorResponseBuilder: () => ({ title: 'Zu viele Login-Versuche. Bitte in 15 Minuten erneut versuchen.' }),
       },
