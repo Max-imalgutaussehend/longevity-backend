@@ -1,7 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { users, samples, sources } from '../db/schema.js';
+import { users, samples, sources, scoreSnapshots } from '../db/schema.js';
 import type { Role } from '../db/schema.js';
 import type { Sample } from '../score/types.js';
 import { filterPlausibleSamples } from '../score/plausibility.js';
@@ -202,4 +202,14 @@ export async function upsertGoogleFitSamples(userId: string, sourceId: string, p
     });
   }
   return parsedSamples.length;
+}
+
+/**
+ * Invalidates (deletes) today's score snapshot for the given user.
+ * Called whenever new health samples are ingested or synced, or sources are toggled/deleted.
+ */
+export async function invalidateTodaySnapshot(userId: string): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  await db.delete(scoreSnapshots)
+    .where(and(eq(scoreSnapshots.userId, userId), eq(scoreSnapshots.computedFor, today)));
 }

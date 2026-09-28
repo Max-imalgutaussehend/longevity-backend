@@ -9,7 +9,7 @@ import { parseAppleHealthXml } from '../../adapters/appleHealth.js';
 import { looksLikeZip, extractExportXml, AppleHealthZipError } from '../../adapters/appleHealthZip.js';
 import { parseHealthAutoExport, type HaePayload } from '../../adapters/healthAutoExport.js';
 import { parseFhirBundle } from '../../adapters/fhir.js';
-import { requireUser } from '../helpers.js';
+import { requireUser, invalidateTodaySnapshot } from '../helpers.js';
 import '../../types.js';
 
 const QUESTIONNAIRE_METRICS = new Set(['smoking', 'alcohol_units']);
@@ -74,6 +74,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       inserted++;
     }
 
+    await invalidateTodaySnapshot(user.id);
     return { inserted, sourceId: src.id };
   });
 
@@ -110,6 +111,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       if (rows.length > 0) inserted++;
     }
 
+    await invalidateTodaySnapshot(user.id);
     return { inserted, sourceId: src.id };
   }
 
@@ -226,6 +228,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       inserted.push(entry.metric);
     }
 
+    await invalidateTodaySnapshot(user.id);
     return reply.status(201).send({ inserted, sourceId: questSource.id });
   }
 
@@ -312,6 +315,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       inserted.push(entry.metric);
     }
 
+    await invalidateTodaySnapshot(user.id);
     return reply.status(201).send({ inserted, sourceId: labSource.id });
   });
 
@@ -357,6 +361,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       if (rows.length > 0) inserted++;
     }
 
+    await invalidateTodaySnapshot(user.id);
     return reply.status(201).send({ inserted, sourceId: labSource.id });
   });
 }

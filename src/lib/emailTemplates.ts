@@ -102,3 +102,56 @@ export function insurerInviteTemplate(orgName: string, inviteUrl: string): { sub
     `),
   };
 }
+
+export interface WeeklyReportEmailData {
+  displayName?: string | null;
+  score: number;
+  delta: number;
+  bestMetricLabel: string;
+  worstMetricLabel: string;
+  streakDays: number;
+  dashboardUrl: string;
+}
+
+export function weeklyReportTemplate(data: WeeklyReportEmailData): { subject: string; html: string } {
+  const name = data.displayName ? escapeHtml(data.displayName) : null;
+  const greeting = name ? `Hallo ${name},` : 'Hallo,';
+  const deltaSign = data.delta > 0 ? `+${data.delta.toFixed(1)}` : `${data.delta.toFixed(1)}`;
+  const deltaColor = data.delta >= 0 ? BRAND_GREEN : '#c2410c';
+
+  return {
+    subject: `Dein wöchentlicher LONGEVITY Vitalitätsbericht (Score: ${Math.round(data.score)})`,
+    html: layout('Wöchentlicher Vitalitätsbericht', `
+      <p style="margin:0 0 16px;">${greeting}</p>
+      <p style="margin:0 0 24px;color:${TEXT_MUTED};">hier ist deine persönliche Zusammenfassung der letzten 7 Tage auf LONGEVITY.</p>
+
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BG};border-radius:12px;margin:0 0 24px;padding:16px;">
+        <tr>
+          <td style="padding:8px 12px;">
+            <div style="font-size:11px;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Aktueller Score</div>
+            <div style="font-size:28px;font-weight:700;color:${TEXT_DARK};">${Math.round(data.score)}</div>
+            <div style="font-size:12px;color:${deltaColor};font-weight:600;margin-top:2px;">${deltaSign} Pkt. im Vergleich zur Vorwoche</div>
+          </td>
+          <td style="padding:8px 12px;text-align:right;">
+            <div style="font-size:11px;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Tracking-Streak</div>
+            <div style="font-size:24px;font-weight:700;color:${TEXT_DARK};">${data.streakDays} Tage</div>
+          </td>
+        </tr>
+      </table>
+
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+        <tr>
+          <td style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.06);font-size:13px;color:${TEXT_MUTED};">Stärkste Kennzahl:</td>
+          <td style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.06);font-size:13px;font-weight:600;color:${TEXT_DARK};text-align:right;">${escapeHtml(data.bestMetricLabel)}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 0;font-size:13px;color:${TEXT_MUTED};">Größter Hebel:</td>
+          <td style="padding:8px 0;font-size:13px;font-weight:600;color:${TEXT_DARK};text-align:right;">${escapeHtml(data.worstMetricLabel)}</td>
+        </tr>
+      </table>
+
+      <div style="margin:0 0 24px;">${button(data.dashboardUrl, 'Zum vollständigen Bericht')}</div>
+      ${fallbackLink(data.dashboardUrl)}
+    `),
+  };
+}

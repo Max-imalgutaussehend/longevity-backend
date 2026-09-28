@@ -1,11 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { eq, desc, and } from 'drizzle-orm';
 import { db } from '../../db/client.js';
-import { sources, samples, scoreSnapshots } from '../../db/schema.js';
+import { sources, samples } from '../../db/schema.js';
 import { METRICS } from '../../score/metrics.js';
 import type { Metric } from '../../score/types.js';
 import { generate } from '../../mock/generate.js';
-import { requireUser, METRIC_LABELS, DOMAIN_LABELS } from '../helpers.js';
+import { requireUser, METRIC_LABELS, DOMAIN_LABELS, invalidateTodaySnapshot } from '../helpers.js';
 import '../../types.js';
 
 export async function sourcesOverviewRoutes(app: FastifyInstance) {
@@ -140,9 +140,7 @@ export async function sourcesOverviewRoutes(app: FastifyInstance) {
       .set({ enabled: body.enabled, consentAt: body.enabled ? new Date() : null })
       .where(eq(sources.id, id));
 
-    const today = new Date().toISOString().slice(0, 10);
-    await db.delete(scoreSnapshots)
-      .where(and(eq(scoreSnapshots.userId, user.id), eq(scoreSnapshots.computedFor, today)));
+    await invalidateTodaySnapshot(user.id);
 
     return reply.status(204).send();
   });
@@ -175,6 +173,7 @@ export async function sourcesOverviewRoutes(app: FastifyInstance) {
     }
 
     await db.update(sources).set({ lastSyncAt: new Date(), enabled: true }).where(eq(sources.id, id));
+    await invalidateTodaySnapshot(user.id);
 
     return { ok: true, sampleCount: newSamples.length };
   });
@@ -213,6 +212,8 @@ export async function sourcesOverviewRoutes(app: FastifyInstance) {
       })));
     }
 
+    await invalidateTodaySnapshot(user.id);
+
     return { ok: true, sourceId: src.id, sampleCount: newSamples.length };
   });
 
@@ -235,10 +236,7 @@ export async function sourcesOverviewRoutes(app: FastifyInstance) {
     }
 
     await db.update(sources).set({ credentials: null, enabled: false, syncStatus: null, syncError: null }).where(eq(sources.id, id));
-
-    const today = new Date().toISOString().slice(0, 10);
-    await db.delete(scoreSnapshots)
-      .where(and(eq(scoreSnapshots.userId, user.id), eq(scoreSnapshots.computedFor, today)));
+    await invalidateTodaySnapshot(user.id);
 
     return reply.status(204).send();
   });
@@ -256,10 +254,7 @@ export async function sourcesOverviewRoutes(app: FastifyInstance) {
 
     await db.delete(samples).where(and(eq(samples.sourceId, id), eq(samples.userId, user.id)));
     await db.update(sources).set({ lastSyncAt: null }).where(eq(sources.id, id));
-
-    const today = new Date().toISOString().slice(0, 10);
-    await db.delete(scoreSnapshots)
-      .where(and(eq(scoreSnapshots.userId, user.id), eq(scoreSnapshots.computedFor, today)));
+    await invalidateTodaySnapshot(user.id);
 
     return reply.status(204).send();
   });

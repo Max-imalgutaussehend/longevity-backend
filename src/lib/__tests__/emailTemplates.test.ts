@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { verifyEmailTemplate, passwordResetTemplate, insurerInviteTemplate, insurerRequestReceivedTemplate } from '../emailTemplates.js';
+import {
+  verifyEmailTemplate,
+  passwordResetTemplate,
+  insurerInviteTemplate,
+  insurerRequestReceivedTemplate,
+  weeklyReportTemplate,
+} from '../emailTemplates.js';
 
 describe('email templates', () => {
   it('embeds the verify URL in both the button and the fallback link', () => {
@@ -42,5 +48,25 @@ describe('email templates', () => {
     const { html } = insurerRequestReceivedTemplate('<script>alert(1)</script>');
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  it('renders weekly report template with score, delta, streak, and metrics', () => {
+    const { subject, html } = weeklyReportTemplate({
+      displayName: 'Max <Mustermann>',
+      score: 75.4,
+      delta: 2.1,
+      bestMetricLabel: 'VO₂max',
+      worstMetricLabel: 'Rauchen',
+      streakDays: 7,
+      dashboardUrl: 'https://example.com/report',
+    });
+    expect(subject).toContain('Score: 75');
+    expect(html).toContain('Hallo Max &lt;Mustermann&gt;,');
+    expect(html).toContain('75');
+    expect(html).toContain('+2.1 Pkt.');
+    expect(html).toContain('VO₂max');
+    expect(html).toContain('Rauchen');
+    expect(html).toContain('7 Tage');
+    expect(html).toContain('https://example.com/report');
   });
 });

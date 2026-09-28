@@ -6,7 +6,7 @@ import { env } from '../../env.js';
 import { exchangeCodeForToken } from '../../lib/oauthTokens.js';
 import { oauthProviders, providerToSourceKind } from '../../lib/oauthProviders.js';
 import { fetchGoogleFitSamples } from '../../adapters/googleFit.js';
-import { requireUser, upsertGoogleFitSamples } from '../helpers.js';
+import { requireUser, upsertGoogleFitSamples, invalidateTodaySnapshot } from '../helpers.js';
 import '../../types.js';
 
 export async function sourcesOAuthRoutes(app: FastifyInstance) {
@@ -108,6 +108,7 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
         const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
         await upsertGoogleFitSamples(userId, src.id, parsedSamples);
         await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
+        await invalidateTodaySnapshot(userId);
       } catch (err) {
         req.log.warn(err, 'Initial Google sync after OAuth callback failed');
       }
@@ -181,6 +182,7 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
       const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
       await upsertGoogleFitSamples(userId, src.id, parsedSamples);
       await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
+      await invalidateTodaySnapshot(userId);
     } catch (err) {
       req.log.warn(err, 'Initial Google sync after OAuth callback failed');
     }
