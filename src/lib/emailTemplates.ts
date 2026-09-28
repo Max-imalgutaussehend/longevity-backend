@@ -83,12 +83,16 @@ export function passwordResetTemplate(resetUrl: string): { subject: string; html
 }
 
 export function insurerRequestReceivedTemplate(company: string): { subject: string; html: string; text: string } {
+  const isGeneric = !company || ['Community / Feedback', 'Forschung & DHBW', 'Privatperson / Allgemein', 'Nutzer Feedback', 'Allgemeine Anfrage'].includes(company);
+  const mentionText = isGeneric ? '' : ` für ${company}`;
+  const mentionHtml = isGeneric ? '' : ` für <strong style="color:${TEXT_DARK};">${escapeHtml(company)}</strong>`;
+
   return {
-    subject: 'Ihre Anfrage bei LONGEVITY ist eingegangen',
-    text: `Hallo,\n\nvielen Dank für Ihr Interesse an LONGEVITY für ${company}. Wir haben Ihre Anfrage erhalten und melden uns in Kürze persönlich bei Ihnen.\n\n---\nLONGEVITY · Wissenschaftlich fundiertes Vitalitäts-Tracking`,
-    html: layout('Anfrage erhalten', `
+    subject: isGeneric ? 'Ihre Nachricht an LONGEVITY ist eingegangen' : 'Ihre Anfrage bei LONGEVITY ist eingegangen',
+    text: `Hallo,\n\nvielen Dank für Ihre Kontaktaufnahme mit LONGEVITY${mentionText}. Wir haben Ihre Nachricht erhalten und melden uns in Kürze persönlich bei Ihnen.\n\n---\nLONGEVITY · Wissenschaftlich fundiertes Vitalitäts-Tracking`,
+    html: layout(isGeneric ? 'Nachricht erhalten' : 'Anfrage erhalten', `
       <p style="margin:0 0 16px;">Hallo,</p>
-      <p style="margin:0 0 24px;color:${TEXT_MUTED};">vielen Dank für Ihr Interesse an LONGEVITY für <strong style="color:${TEXT_DARK};">${escapeHtml(company)}</strong>. Wir haben Ihre Anfrage erhalten und melden uns in Kürze persönlich bei Ihnen.</p>
+      <p style="margin:0 0 24px;color:${TEXT_MUTED};">vielen Dank für Ihre Kontaktaufnahme mit LONGEVITY${mentionHtml}. Wir haben Ihre Nachricht erhalten und melden uns in Kürze persönlich bei Ihnen.</p>
     `),
   };
 }
