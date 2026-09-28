@@ -42,7 +42,11 @@ function weekStartIso(date: Date): string {
 }
 
 const METRIC_MAP: Record<string, { metric: Sample['metric']; toValue: (dp: HaeDataPoint, unit: string) => number | null; unit: string }> = {
-  HeartRate: {
+  // "HeartRate" in Health Auto Export is momentary/ambient heart rate,
+  // including workout peaks — it must not feed resting_hr directly (see
+  // handling of "RestingHeartRate" below, and #96). No METRIC_MAP entry
+  // here on purpose so the generic per-datapoint loop skips it.
+  RestingHeartRate: {
     metric: 'resting_hr',
     toValue: (dp) => dp.qty ?? dp.Avg ?? null,
     unit: 'bpm',
@@ -66,11 +70,6 @@ const METRIC_MAP: Record<string, { metric: Sample['metric']; toValue: (dp: HaeDa
     metric: 'sleep_duration',
     toValue: (dp) => dp.qty ?? dp.Avg ?? null,
     unit: 'h',
-  },
-  StepCount: {
-    metric: 'steps',
-    toValue: (dp) => dp.qty ?? null,
-    unit: 'steps',
   },
   WaistCircumference: {
     metric: 'waist',
@@ -116,7 +115,7 @@ function parseSleepConsistency(metrics: HaeMetric[]): Sample | null {
   };
 }
 
-function parseZone2Minutes(workouts: HaeWorkout[], options?: HealthAutoExportOptions): Sample | null {
+function parseZone2Minutes(workouts: HaeWorkout[], options?: HealthAutoExportOptions): Sample[] {
   let age = DEFAULT_AGE_FOR_HRMAX;
   if (options?.birthDate) {
     const birth = new Date(options.birthDate);
@@ -136,19 +135,22 @@ function parseZone2Minutes(workouts: HaeWorkout[], options?: HealthAutoExportOpt
     return w.heartRateAvg >= hrMax * ZONE2_LOW_PCT && w.heartRateAvg <= hrMax * ZONE2_HIGH_PCT;
   });
 
-  if (zone2Workouts.length === 0) return null;
+  // Aggregate per calendar week (min/week) instead of summing the entire
+  // payload into a single sample — a sync spanning multiple weeks would
+  // otherwise blend every week's minutes into one value.
+  const minutesByWeek = new Map<string, number>();
+  for (const w of zone2Workouts) {
+    const week = weekStartIso(new Date(w.start));
+    minutesByWeek.set(week, (minutesByWeek.get(week) ?? 0) + (w.duration ?? 0) / 60);
+  }
 
-  const totalMinutes = zone2Workouts.reduce((sum, w) => sum + (w.duration ?? 0) / 60, 0);
-  const lastWorkout = zone2Workouts[zone2Workouts.length - 1];
-  const measuredAt = lastWorkout?.start ? new Date(lastWorkout.start).toISOString() : new Date().toISOString();
-
-  return {
-    metric: 'zone2_minutes',
-    value: totalMinutes,
+  return [...minutesByWeek.entries()].map(([week, totalMinutes]) => ({
+    metric: 'zone2_minutes' as const,
+    value: Math.round(totalMinutes * 10) / 10,
     unit: 'min',
-    measuredAt,
-    sourceKind: 'health_auto_export',
-  };
+    measuredAt: week,
+    sourceKind: 'health_auto_export' as const,
+  }));
 }
 
 function parseStrengthSessions(workouts: HaeWorkout[]): Sample[] {
@@ -195,12 +197,36 @@ export function parseHealthAutoExport(payload: HaePayload, options?: HealthAutoE
     }
   }
 
+  const stepMetric = metrics.find((m) => m.name === 'StepCount');
+  if (stepMetric) {
+    const stepsByDay = new Map<string, { total: number; lastMeasuredAt: string }>();
+    for (const dp of stepMetric.data) {
+      if (!dp.date || dp.qty === undefined) continue;
+      const measuredAt = new Date(dp.date).toISOString();
+      const dayKey = measuredAt.slice(0, 10);
+      const existing = stepsByDay.get(dayKey);
+      if (existing) {
+        existing.total += dp.qty;
+        if (measuredAt > existing.lastMeasuredAt) existing.lastMeasuredAt = measuredAt;
+      } else {
+        stepsByDay.set(dayKey, { total: dp.qty, lastMeasuredAt: measuredAt });
+      }
+    }
+    for (const { total, lastMeasuredAt } of stepsByDay.values()) {
+      samples.push({
+        metric: 'steps',
+        value: Math.round(total),
+        unit: 'steps',
+        measuredAt: lastMeasuredAt,
+        sourceKind: 'health_auto_export',
+      });
+    }
+  }
+
   const consistency = parseSleepConsistency(metrics);
   if (consistency) samples.push(consistency);
 
-  const zone2 = parseZone2Minutes(workouts, options);
-  if (zone2) samples.push(zone2);
-
+  samples.push(...parseZone2Minutes(workouts, options));
   samples.push(...parseStrengthSessions(workouts));
 
   return samples;

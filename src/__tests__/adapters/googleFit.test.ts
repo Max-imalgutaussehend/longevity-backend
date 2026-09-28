@@ -53,6 +53,29 @@ describe('parseGoogleFitAggregate', () => {
     expect(parseGoogleFitAggregate({ bucket: [] })).toEqual([]);
   });
 
+  it('sums multiple sleep segments in the same bucket instead of taking only the last one (#96)', () => {
+    // 3 segments (light/deep/REM) totalling 7.5h; the last segment alone
+    // (0.5h) must not represent the whole night.
+    const samples = parseGoogleFitAggregate({
+      bucket: [{
+        startTimeMillis: '1717200000000',
+        endTimeMillis: '1717286400000',
+        dataset: [{
+          dataSourceId: 'derived:com.google.sleep.segment:com.google.android.gms:merged',
+          point: [
+            { startTimeNanos: '1717221600000000000', endTimeNanos: '1717239600000000000', dataTypeName: 'com.google.sleep.segment', value: [{ intVal: 1 }] }, // 5h
+            { startTimeNanos: '1717239600000000000', endTimeNanos: '1717248600000000000', dataTypeName: 'com.google.sleep.segment', value: [{ intVal: 4 }] }, // 2.5h
+            { startTimeNanos: '1717248600000000000', endTimeNanos: '1717250400000000000', dataTypeName: 'com.google.sleep.segment', value: [{ intVal: 1 }] }, // 0.5h
+          ],
+        }],
+      }],
+    });
+
+    const sleep = samples.filter(s => s.metric === 'sleep_duration');
+    expect(sleep).toHaveLength(1);
+    expect(sleep[0].value).toBeCloseTo(8, 5);
+  });
+
   it('skips points with no usable value', () => {
     const samples = parseGoogleFitAggregate({
       bucket: [{
@@ -134,6 +157,25 @@ describe('parseGoogleHealthV4DataPoints', () => {
     expect(samples[0].metric).toBe('sleep_duration');
     expect(samples[0].value).toBe(8);
     expect(samples[0].unit).toBe('h');
+  });
+
+  it('sums multiple sleep segments for the same night instead of taking only the last one (#96)', () => {
+    const samples = parseGoogleHealthV4DataPoints('sleep', [
+      { sleep: { interval: { startTime: '2026-09-12T23:00:00Z', endTime: '2026-09-13T02:00:00Z' } } }, // 3h
+      { sleep: { interval: { startTime: '2026-09-13T02:00:00Z', endTime: '2026-09-13T06:30:00Z' } } }, // 4.5h
+      { sleep: { interval: { startTime: '2026-09-13T06:30:00Z', endTime: '2026-09-13T07:00:00Z' } } }, // 0.5h
+    ]);
+    expect(samples).toHaveLength(1);
+    expect(samples[0].metric).toBe('sleep_duration');
+    expect(samples[0].value).toBe(8);
+  });
+
+  it('keeps sleep segments from different nights as separate samples', () => {
+    const samples = parseGoogleHealthV4DataPoints('sleep', [
+      { sleep: { interval: { startTime: '2026-09-12T23:00:00Z', endTime: '2026-09-13T07:00:00Z' } } },
+      { sleep: { interval: { startTime: '2026-09-13T23:00:00Z', endTime: '2026-09-14T06:30:00Z' } } },
+    ]);
+    expect(samples).toHaveLength(2);
   });
 
   it('parses active-minutes data points', () => {

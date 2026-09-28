@@ -93,10 +93,15 @@ export function parseGoogleFitAggregate(response: GoogleFitAggregateResponse): S
       }
     }
 
-    // Process other points (heart rate, sleep, active minutes)
+    // Process other points (heart rate, sleep, active minutes). Sleep
+    // arrives as multiple segments per night — sum them per bucket instead
+    // of pushing one sample per segment, or only the last (often shortest)
+    // segment would end up representing the whole night's sleep duration.
+    let sleepHoursTotal = 0;
+    let sleepLastMeasuredAt: string | null = null;
+
     for (const point of otherPoints) {
       const value = pointValue(point);
-      if (value === null) continue;
 
       const endMs = Number(BigInt(point.endTimeNanos) / 1_000_000n);
       const measuredAt = endMs > Date.now()
@@ -104,15 +109,27 @@ export function parseGoogleFitAggregate(response: GoogleFitAggregateResponse): S
         : nanosToIso(point.endTimeNanos);
 
       if (point.dataTypeName === DATA_TYPE_HEART_RATE) {
+        if (value === null) continue;
         samples.push({ metric: 'resting_hr', value, unit: 'bpm', measuredAt, sourceKind: 'google_fit' });
       } else if (point.dataTypeName === DATA_TYPE_SLEEP) {
         const startNanos = BigInt(point.startTimeNanos);
         const endNanos = BigInt(point.endTimeNanos);
-        const hours = Number(endNanos - startNanos) / 1e9 / 3600;
-        samples.push({ metric: 'sleep_duration', value: hours, unit: 'h', measuredAt, sourceKind: 'google_fit' });
+        sleepHoursTotal += Number(endNanos - startNanos) / 1e9 / 3600;
+        if (!sleepLastMeasuredAt || measuredAt > sleepLastMeasuredAt) sleepLastMeasuredAt = measuredAt;
       } else if (point.dataTypeName === DATA_TYPE_ACTIVE_MINUTES) {
+        if (value === null) continue;
         samples.push({ metric: 'zone2_minutes', value, unit: 'min', measuredAt, sourceKind: 'google_fit' });
       }
+    }
+
+    if (sleepHoursTotal > 0 && sleepLastMeasuredAt) {
+      samples.push({
+        metric: 'sleep_duration',
+        value: Math.round(sleepHoursTotal * 100) / 100,
+        unit: 'h',
+        measuredAt: sleepLastMeasuredAt,
+        sourceKind: 'google_fit',
+      });
     }
   }
 
@@ -372,15 +389,37 @@ export function parseGoogleHealthV4DataPoints(dataType: string, dataPoints: Goog
       }
     }
   } else if (dataType === 'sleep') {
+    // Google Fit splits one night's sleep into multiple segments (awake,
+    // light, deep, REM, ...) — sum them per night (grouped by the segment's
+    // end date) instead of pushing one sample per segment, or the last
+    // (often shortest) segment would represent the whole night's duration.
+    const sleepHoursByNight = new Map<string, { totalHours: number; lastEnd: string }>();
+
     for (const dp of dataPoints) {
       const start = dp.sleep?.interval?.startTime;
       const end = dp.sleep?.interval?.endTime;
-      if (start && end) {
-        const hours = (new Date(end).getTime() - new Date(start).getTime()) / 3600000;
-        if (hours > 0) {
-          samples.push({ metric: 'sleep_duration', value: Math.round(hours * 100) / 100, unit: 'h', measuredAt: end, sourceKind: 'google_fit' });
-        }
+      if (!start || !end) continue;
+      const hours = (new Date(end).getTime() - new Date(start).getTime()) / 3600000;
+      if (hours <= 0) continue;
+
+      const dayStr = end.slice(0, 10);
+      const existing = sleepHoursByNight.get(dayStr);
+      if (existing) {
+        existing.totalHours += hours;
+        if (end > existing.lastEnd) existing.lastEnd = end;
+      } else {
+        sleepHoursByNight.set(dayStr, { totalHours: hours, lastEnd: end });
       }
+    }
+
+    for (const { totalHours, lastEnd } of sleepHoursByNight.values()) {
+      samples.push({
+        metric: 'sleep_duration',
+        value: Math.round(totalHours * 100) / 100,
+        unit: 'h',
+        measuredAt: lastEnd,
+        sourceKind: 'google_fit',
+      });
     }
   } else if (dataType === 'active-minutes') {
     // Group active minutes by day and origin to avoid summing multiple trackers (e.g. Fitbit + Google Fit)

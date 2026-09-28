@@ -14,11 +14,6 @@ const METRIC_MAP: Record<string, { metric: Sample['metric']; toValue: (v: number
     toValue: (v) => v,
     unit: 'ml/kg/min',
   },
-  HKQuantityTypeIdentifierHeartRate: {
-    metric: 'resting_hr',
-    toValue: (v) => v,
-    unit: 'bpm',
-  },
   HKQuantityTypeIdentifierRestingHeartRate: {
     metric: 'resting_hr',
     toValue: (v) => v,
@@ -43,11 +38,6 @@ const METRIC_MAP: Record<string, { metric: Sample['metric']; toValue: (v: number
     metric: 'hrv_rmssd',
     toValue: (v, unit) => unit === 's' ? v * 1000 : v,
     unit: 'ms',
-  },
-  HKQuantityTypeIdentifierStepCount: {
-    metric: 'steps',
-    toValue: (v) => v,
-    unit: 'steps',
   },
 };
 
@@ -126,6 +116,29 @@ export async function parseAppleHealthXml(stream: Readable, options?: AppleHealt
   const pendingWorkouts: PendingWorkout[] = [];
   const ambientHeartRates: Array<{ value: number; time: number }> = [];
   const sleepOnsetsByDay = new Map<string, SleepOnsetEntry>();
+  // Apple Health exports steps as many small chunks per day (30-100 steps
+  // each) — sum them per calendar day (ISO date of the measurement) instead
+  // of taking the last chunk as if it were the day's total.
+  const stepsByDay = new Map<string, { total: number; lastMeasuredAt: string }>();
+  // zone2_minutes (min/week) must be aggregated per calendar week — a
+  // per-workout sample is silently discarded by computeScore's "latest
+  // sample wins" rule for every workout but the most recent one.
+  const zone2MinutesByWeek = new Map<string, { totalMinutes: number; lastMeasuredAt: string }>();
+
+  function addZone2Minutes(minutes: number, measuredAtIso: string) {
+    const date = new Date(measuredAtIso);
+    const weekStart = new Date(date);
+    weekStart.setUTCDate(date.getUTCDate() - date.getUTCDay());
+    weekStart.setUTCHours(0, 0, 0, 0);
+    const key = weekStart.toISOString();
+    const existing = zone2MinutesByWeek.get(key);
+    if (existing) {
+      existing.totalMinutes += minutes;
+      if (measuredAtIso > existing.lastMeasuredAt) existing.lastMeasuredAt = measuredAtIso;
+    } else {
+      zone2MinutesByWeek.set(key, { totalMinutes: minutes, lastMeasuredAt: measuredAtIso });
+    }
+  }
 
   function trackSleepOnset(startDateStr: string) {
     const m = /(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(startDateStr);
@@ -226,13 +239,7 @@ export async function parseAppleHealthXml(stream: Readable, options?: AppleHealt
     const zone2Max = 0.70 * hrMax;
 
     if (avgHr >= zone2Min && avgHr <= zone2Max) {
-      samples.push({
-        metric: 'zone2_minutes',
-        value: Math.round(durationMinutes * 10) / 10,
-        unit: 'min',
-        measuredAt: new Date(measuredAt).toISOString(),
-        sourceKind: 'apple_health',
-      });
+      addZone2Minutes(durationMinutes, new Date(measuredAt).toISOString());
     }
   }
 
@@ -386,21 +393,39 @@ export async function parseAppleHealthXml(stream: Readable, options?: AppleHealt
         continue;
       }
 
-      // Heart rate (collect for ambient workout matching + existing resting_hr mapping)
+      // Momentary heart rate (workout peaks included) is only collected for
+      // ambient zone-2 workout matching below — it must NOT be mapped to
+      // resting_hr directly, or a 180 bpm workout spike overwrites the real
+      // resting heart rate since computeScore takes the latest sample.
+      // HKQuantityTypeIdentifierRestingHeartRate (handled by METRIC_MAP below)
+      // is the only source for the resting_hr metric.
       if (type === 'HKQuantityTypeIdentifierHeartRate') {
         const hr = parseFloat(attrs['value']);
         const measuredAt = attrs['endDate'] ?? attrs['startDate'];
         if (!isNaN(hr) && measuredAt) {
           ambientHeartRates.push({ value: hr, time: new Date(measuredAt).getTime() });
-          samples.push({
-            metric: 'resting_hr',
-            value: hr,
-            unit: attrs['unit'] ?? 'bpm',
-            measuredAt: new Date(measuredAt).toISOString(),
-            sourceKind: 'apple_health',
-          });
-          continue;
         }
+        continue;
+      }
+
+      // Step counts arrive as many chunks (30-100 steps) per day — accumulate
+      // per calendar day and emit one summed sample post-stream instead of
+      // pushing each chunk as its own sample (the last chunk would otherwise
+      // look like the day's total, since computeScore takes the latest one).
+      if (type === 'HKQuantityTypeIdentifierStepCount') {
+        const stepValue = parseFloat(attrs['value']);
+        const measuredAt = attrs['endDate'] ?? attrs['startDate'];
+        if (!isNaN(stepValue) && measuredAt) {
+          const dayKey = measuredAt.slice(0, 10);
+          const existing = stepsByDay.get(dayKey);
+          if (existing) {
+            existing.total += stepValue;
+            if (measuredAt > existing.lastMeasuredAt) existing.lastMeasuredAt = measuredAt;
+          } else {
+            stepsByDay.set(dayKey, { total: stepValue, lastMeasuredAt: measuredAt });
+          }
+        }
+        continue;
       }
 
       // Standard quantity mappings
@@ -424,6 +449,17 @@ export async function parseAppleHealthXml(stream: Readable, options?: AppleHealt
     }
   }
 
+  // ── Post-stream: emit one summed steps sample per calendar day ────────────
+  for (const [, { total, lastMeasuredAt }] of stepsByDay) {
+    samples.push({
+      metric: 'steps',
+      value: Math.round(total),
+      unit: 'steps',
+      measuredAt: new Date(lastMeasuredAt).toISOString(),
+      sourceKind: 'apple_health',
+    });
+  }
+
   // ── Post-stream: resolve pending workouts with ambient HR ─────────────────
   if (pendingWorkouts.length > 0 && ambientHeartRates.length > 0) {
     const age = resolveAge(options, dobFromXml);
@@ -439,16 +475,21 @@ export async function parseAppleHealthXml(stream: Readable, options?: AppleHealt
       if (matchingHrs.length > 0) {
         const avgHr = matchingHrs.reduce((a, b) => a + b, 0) / matchingHrs.length;
         if (avgHr >= zone2Min && avgHr <= zone2Max) {
-          samples.push({
-            metric: 'zone2_minutes',
-            value: Math.round(pw.durationMinutes * 10) / 10,
-            unit: 'min',
-            measuredAt: new Date(pw.measuredAt).toISOString(),
-            sourceKind: 'apple_health',
-          });
+          addZone2Minutes(pw.durationMinutes, new Date(pw.measuredAt).toISOString());
         }
       }
     }
+  }
+
+  // ── Post-stream: emit one summed zone2_minutes sample per calendar week ───
+  for (const [weekStart, { totalMinutes }] of zone2MinutesByWeek) {
+    samples.push({
+      metric: 'zone2_minutes',
+      value: Math.round(totalMinutes * 10) / 10,
+      unit: 'min',
+      measuredAt: weekStart,
+      sourceKind: 'apple_health',
+    });
   }
 
   // ── Post-stream: calculate sleep consistency (StdDev of sleep onset times) ─
