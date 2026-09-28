@@ -237,6 +237,11 @@ export async function parseAppleHealthXml(stream: Readable, options?: AppleHealt
   }
 
   for await (const line of rl) {
+    // ── XXE & XML Entity Expansion (Billion Laughs) protection ─────────────
+    if (/<!ENTITY/i.test(line) || /SYSTEM\s+["']/i.test(line) || /PUBLIC\s+["']/i.test(line)) {
+      throw new Error('Ungültiges XML: Externe DTDs und Entity-Definitionen (XXE) sind aus Sicherheitsgründen nicht erlaubt.');
+    }
+
     // ── <Me ...> ─────────────────────────────────────────────────────────────
     if (line.includes('<Me ')) {
       const meMatch = ME_TAG_RE.exec(line);

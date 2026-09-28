@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import helmet from '@fastify/helmet';
 import cookie from '@fastify/cookie';
 import session from '@fastify/session';
 import csrf from '@fastify/csrf-protection';
@@ -22,6 +23,32 @@ export async function buildApp() {
   const app = Fastify({
     logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
     trustProxy: true,
+  });
+
+  await app.register(helmet, {
+    global: true,
+    frameguard: { action: 'deny' },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        fontSrc: ["'self'", 'https:', 'data:'],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        objectSrc: ["'none'"],
+        scriptSrc: ["'self'"],
+        scriptSrcAttr: ["'none'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        connectSrc: ["'self'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+  });
+
+  app.addHook('onSend', async (_req, reply) => {
+    reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   });
 
   await app.register(rateLimit, { global: false });
