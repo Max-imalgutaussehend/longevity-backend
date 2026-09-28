@@ -9,7 +9,7 @@ import {
   partnerOffers,
   insurerRequests,
 } from '../db/schema.js';
-import { eq, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { hashPassword } from '../lib/password.js';
 import { hashKvnr } from '../lib/kvnr.js';
 import { computeScore } from '../score/index.js';
