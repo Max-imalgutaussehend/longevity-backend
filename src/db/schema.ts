@@ -28,7 +28,7 @@ export const users = pgTable('users', {
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   healthDataConsentAt: timestamp('health_data_consent_at', { withTimezone: true }),
   healthDataConsentVersion: text('health_data_consent_version'),
-  webhookSecret: text('webhook_secret').unique().notNull().$defaultFn(() => crypto.randomBytes(32).toString('hex')),
+  webhookSecret: text('webhook_secret').unique().notNull().default(sql`replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '')`).$defaultFn(() => crypto.randomBytes(32).toString('hex')),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ orgIdx: index().on(t.organizationId) }));
 
