@@ -51,7 +51,26 @@ export async function buildApp() {
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   });
 
-  await app.register(rateLimit, { global: false });
+  // Global baseline DDoS protection (120 req/min per IP); routes with their
+  // own config.rateLimit (register, login, apple-health upload, verify/:id,
+  // report/send, ...) override this with a stricter, endpoint-specific limit.
+  await app.register(rateLimit, {
+    global: true,
+    max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 10_000 : 120,
+    timeWindow: '1 minute',
+    errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Anfragen. Bitte kurz warten.' }),
+  });
+
+  // @fastify/rate-limit only emits the legacy x-ratelimit-* headers; mirror
+  // them to the IETF-standard RateLimit-Limit/Remaining/Reset names too.
+  app.addHook('onSend', async (_req, reply) => {
+    const limit = reply.getHeader('x-ratelimit-limit');
+    const remaining = reply.getHeader('x-ratelimit-remaining');
+    const reset = reply.getHeader('x-ratelimit-reset');
+    if (limit !== undefined) reply.header('RateLimit-Limit', limit);
+    if (remaining !== undefined) reply.header('RateLimit-Remaining', remaining);
+    if (reset !== undefined) reply.header('RateLimit-Reset', reset);
+  });
   await app.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } }); // 500 MB cap for AH exports (ZIP or raw XML)
 
   await app.register(cookie);
