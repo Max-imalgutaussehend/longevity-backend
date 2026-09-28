@@ -510,6 +510,42 @@ paths['/offers'] = {
     responses: { 200: { description: 'PartnerOffer[]' } } },
 };
 
+paths['/offers/{id}/claim'] = {
+  post: { operationId: 'submitBenefitClaim', tags: ['Offers'], summary: 'Submit a qualified offer directly to its issuing insurer',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: {
+      201: { description: 'Created', content: { 'application/json': { schema: ref('BenefitClaim') } } },
+      400: { description: 'Offer has no organization, or holding requirements not met' },
+      404: { description: 'Offer not found' },
+      409: { description: 'An active (submitted or accepted) claim already exists for this offer' },
+      ...auth401,
+    } },
+};
+
+paths['/insurer/claims'] = {
+  get: { operationId: 'listInsurerClaims', tags: ['Insurer'], summary: 'List benefit claims submitted to the organization',
+    responses: {
+      200: { description: 'InsurerClaim[]', content: { 'application/json': { schema: { type: 'array', items: ref('InsurerClaim') } } } },
+      403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401,
+    } },
+};
+
+paths['/insurer/claims/{id}/decide'] = {
+  post: { operationId: 'decideInsurerClaim', tags: ['Insurer'], summary: 'Accept or reject a submitted benefit claim',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['decision'], properties: { decision: { type: 'string', enum: ['accepted', 'rejected'] } },
+    } } } },
+    responses: {
+      200: { description: 'Decided' },
+      400: { description: 'Invalid decision' },
+      403: { description: 'Not an insurer role' },
+      404: { description: 'Claim not found or not owned by this organization' },
+      409: { description: 'Already decided' },
+      ...auth401,
+    } },
+};
+
 // ── Components ────────────────────────────────────────────────────────────────
 const schemas: Record<string, unknown> = {
   Error: { type: 'object', required: ['title'], properties: { title: { type: 'string' } } },
@@ -578,6 +614,33 @@ const schemas: Record<string, unknown> = {
       valueLabel: { type: 'string' },
       isDemo: { type: 'boolean' }, qualified: { type: 'boolean' },
       daysHeld: { type: 'integer' }, daysRemaining: { type: 'integer' },
+      organizationId: { type: ['string', 'null'], format: 'uuid' },
+      claimStatus: { type: ['string', 'null'], enum: ['submitted', 'accepted', 'rejected', null] },
+      claimSubmittedAt: { type: ['string', 'null'], format: 'date-time' },
+    },
+  },
+  BenefitClaim: {
+    type: 'object',
+    required: ['id', 'status', 'submittedAt'],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      status: { type: 'string', enum: ['submitted', 'accepted', 'rejected'] },
+      submittedAt: { type: 'string', format: 'date-time' },
+    },
+  },
+  InsurerClaim: {
+    type: 'object',
+    required: ['id', 'status', 'bandLow', 'bandHigh', 'submittedAt', 'offerTitle', 'userEmail', 'verifyUrl'],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      status: { type: 'string', enum: ['submitted', 'accepted', 'rejected'] },
+      bandLow: { type: 'integer' }, bandHigh: { type: 'integer' },
+      submittedAt: { type: 'string', format: 'date-time' },
+      decidedAt: { type: ['string', 'null'], format: 'date-time' },
+      offerTitle: { type: 'string' },
+      userEmail: { type: 'string', format: 'email' },
+      userDisplayName: { type: ['string', 'null'] },
+      verifyUrl: { type: 'string' },
     },
   },
   User: {
