@@ -22,6 +22,8 @@ export const users = pgTable('users', {
   displayName: text('display_name'),
   role: text('role').notNull().default('b2c'),
   organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'set null' }),
+  organizationVerifiedAt: timestamp('organization_verified_at', { withTimezone: true }),
+  kvnrHash: text('kvnr_hash').unique(),
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   healthDataConsentAt: timestamp('health_data_consent_at', { withTimezone: true }),
   healthDataConsentVersion: text('health_data_consent_version'),
