@@ -25,7 +25,6 @@ describe('CSRF Protection & Secure Cookie Configuration (#103)', () => {
     app = await buildApp();
     await app.ready();
 
-    const { sql } = await import('drizzle-orm');
     const { randomUUID } = await import('node:crypto');
     const userId = randomUUID();
     const email = `csrf-test-${Date.now()}@example.com`;
