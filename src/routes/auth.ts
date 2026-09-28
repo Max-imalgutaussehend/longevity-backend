@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import crypto from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { env } from '../env.js';
@@ -79,6 +80,7 @@ export async function authRoutes(app: FastifyInstance) {
       birthDate: cleanBirthDate,
       sex: cleanSex,
       displayName: displayName ?? null,
+      webhookSecret: crypto.randomBytes(32).toString('hex'),
     }).returning();
 
     req.session.userId = user.id;
