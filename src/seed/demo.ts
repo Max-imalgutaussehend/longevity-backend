@@ -1,7 +1,8 @@
 import { db } from '../db/client.js';
-import { users, sources, samples } from '../db/schema.js';
+import { users, sources, samples, shareTokens } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { hashPassword } from '../lib/password.js';
+import { getActivePrivateKey, buildTokenPayload, signTokenPayload } from '../lib/signing.js';
 import { generate } from '../mock/generate.js';
 import demoFixture from '../score/__tests__/__fixtures__/demo.json';
 
@@ -120,7 +121,37 @@ export async function run() {
     }
   }
 
-  console.log(`Demo user created: ${DEMO_EMAIL} / ${DEMO_PASSWORD} with ${allSamples.length} samples across 4 sources.`);
+  // Deterministic demo share token with Ed25519 signature
+  const DEMO_TOKEN_ID = 'demo-token';
+  const privateKey = getActivePrivateKey();
+  const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+  const issuedAt = new Date('2026-09-01T12:00:00.000Z');
+  const bandLow = 70;
+  const bandHigh = 79;
+  const payload = buildTokenPayload(DEMO_TOKEN_ID, bandLow, bandHigh, expiresAt.toISOString());
+  const signature = privateKey ? signTokenPayload(payload, privateKey) : DEMO_TOKEN_ID;
+
+  await db.delete(shareTokens).where(eq(shareTokens.id, DEMO_TOKEN_ID));
+  await db.insert(shareTokens).values({
+    id: DEMO_TOKEN_ID,
+    userId: user.id,
+    bandLow,
+    bandHigh,
+    issuedAt,
+    expiresAt,
+    signature,
+    metadata: {
+      verifiedOnly: true,
+      trustLevel: 'cloud_verified',
+      verifiedSources: ['apple_health', 'oura', 'withings'],
+      certificateType: 'GKV / PKV Verifizierter Prämiennachweis',
+      totalSampleCount: allSamples.length,
+      excludedSampleCount: 0,
+      activeDays: 90,
+    },
+  });
+
+  console.log(`Demo user created: ${DEMO_EMAIL} / ${DEMO_PASSWORD} with ${allSamples.length} samples across 4 sources and demo-token seeded.`);
   return { user, sampleCount: allSamples.length };
 }
 
