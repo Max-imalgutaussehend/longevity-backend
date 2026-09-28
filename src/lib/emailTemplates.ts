@@ -54,9 +54,10 @@ function fallbackLink(url: string): string {
   return `<p style="color:${TEXT_MUTED};font-size:12px;word-break:break-all;">Falls der Button nicht funktioniert, kopiere diesen Link in deinen Browser:<br><a href="${safeUrl}" style="color:${BRAND_GREEN};">${safeUrl}</a></p>`;
 }
 
-export function verifyEmailTemplate(verifyUrl: string): { subject: string; html: string } {
+export function verifyEmailTemplate(verifyUrl: string): { subject: string; html: string; text: string } {
   return {
     subject: 'Bitte bestätige deine E-Mail-Adresse',
+    text: `Willkommen bei LONGEVITY!\n\nBitte bestätige deine E-Mail-Adresse, um dein Konto vollständig zu nutzen.\n\nLink bestätigen: ${verifyUrl}\n\nDer Link ist eine Stunde gültig.\n\n---\nLONGEVITY · Wissenschaftlich fundiertes Vitalitäts-Tracking`,
     html: layout('E-Mail bestätigen', `
       <p style="margin:0 0 16px;">Willkommen bei LONGEVITY!</p>
       <p style="margin:0 0 24px;color:${TEXT_MUTED};">Bitte bestätige deine E-Mail-Adresse, um dein Konto vollständig zu nutzen.</p>
@@ -67,9 +68,10 @@ export function verifyEmailTemplate(verifyUrl: string): { subject: string; html:
   };
 }
 
-export function passwordResetTemplate(resetUrl: string): { subject: string; html: string } {
+export function passwordResetTemplate(resetUrl: string): { subject: string; html: string; text: string } {
   return {
     subject: 'Passwort zurücksetzen',
+    text: `Du hast ein neues Passwort angefordert.\n\nNeues Passwort setzen: ${resetUrl}\n\nDer Link ist eine Stunde gültig. Falls du das nicht warst, kannst du diese E-Mail ignorieren.\n\n---\nLONGEVITY · Wissenschaftlich fundiertes Vitalitäts-Tracking`,
     html: layout('Passwort zurücksetzen', `
       <p style="margin:0 0 16px;">Du hast ein neues Passwort angefordert.</p>
       <p style="margin:0 0 24px;color:${TEXT_MUTED};">Klicke auf den folgenden Button, um ein neues Passwort zu setzen.</p>
@@ -80,9 +82,10 @@ export function passwordResetTemplate(resetUrl: string): { subject: string; html
   };
 }
 
-export function insurerRequestReceivedTemplate(company: string): { subject: string; html: string } {
+export function insurerRequestReceivedTemplate(company: string): { subject: string; html: string; text: string } {
   return {
     subject: 'Ihre Anfrage bei LONGEVITY ist eingegangen',
+    text: `Hallo,\n\nvielen Dank für Ihr Interesse an LONGEVITY für ${company}. Wir haben Ihre Anfrage erhalten und melden uns in Kürze persönlich bei Ihnen.\n\n---\nLONGEVITY · Wissenschaftlich fundiertes Vitalitäts-Tracking`,
     html: layout('Anfrage erhalten', `
       <p style="margin:0 0 16px;">Hallo,</p>
       <p style="margin:0 0 24px;color:${TEXT_MUTED};">vielen Dank für Ihr Interesse an LONGEVITY für <strong style="color:${TEXT_DARK};">${escapeHtml(company)}</strong>. Wir haben Ihre Anfrage erhalten und melden uns in Kürze persönlich bei Ihnen.</p>
@@ -90,9 +93,10 @@ export function insurerRequestReceivedTemplate(company: string): { subject: stri
   };
 }
 
-export function insurerInviteTemplate(orgName: string, inviteUrl: string): { subject: string; html: string } {
+export function insurerInviteTemplate(orgName: string, inviteUrl: string): { subject: string; html: string; text: string } {
   return {
     subject: 'Einladung: LONGEVITY-Zugang für Krankenkassen',
+    text: `Hallo,\n\nSie wurden als Krankenkassen-Administrator für ${orgName} bei LONGEVITY eingeladen.\n\nBitte legen Sie über den folgenden Link Ihr Passwort fest, um den Zugang zu aktivieren:\n${inviteUrl}\n\nDer Link ist 7 Tage gültig.\n\n---\nLONGEVITY · Wissenschaftlich fundiertes Vitalitäts-Tracking`,
     html: layout('Krankenkassen-Einladung', `
       <p style="margin:0 0 16px;">Hallo,</p>
       <p style="margin:0 0 24px;color:${TEXT_MUTED};">Sie wurden als Krankenkassen-Administrator für <strong style="color:${TEXT_DARK};">${escapeHtml(orgName)}</strong> bei LONGEVITY eingeladen.</p>
@@ -114,7 +118,7 @@ export interface WeeklyReportEmailData {
   dashboardUrl: string;
 }
 
-export function weeklyReportTemplate(data: WeeklyReportEmailData): { subject: string; html: string } {
+export function weeklyReportTemplate(data: WeeklyReportEmailData): { subject: string; html: string; text: string } {
   const name = data.displayName ? escapeHtml(data.displayName) : null;
   const greeting = name ? `Hallo ${name},` : 'Hallo,';
   const deltaSign = data.delta > 0 ? `+${data.delta.toFixed(1)}` : `${data.delta.toFixed(1)}`;
@@ -122,6 +126,7 @@ export function weeklyReportTemplate(data: WeeklyReportEmailData): { subject: st
 
   return {
     subject: `Dein wöchentlicher LONGEVITY Vitalitätsbericht (Score: ${Math.round(data.score)})`,
+    text: `${greeting}\n\nhier ist deine persönliche Zusammenfassung der letzten 7 Tage auf LONGEVITY.\n\nAktueller Score: ${Math.round(data.score)} (${deltaSign} Pkt.)\nTracking-Streak: ${data.streakDays} Tage\n\nStärkste Kennzahl: ${data.bestMetricLabel}\nGrößter Hebel: ${data.worstMetricLabel}\n\nZum vollständigen Bericht: ${data.dashboardUrl}\n\n---\nLONGEVITY · Wissenschaftlich fundiertes Vitalitäts-Tracking`,
     html: layout('Wöchentlicher Vitalitätsbericht', `
       <p style="margin:0 0 16px;">${greeting}</p>
       <p style="margin:0 0 24px;color:${TEXT_MUTED};">hier ist deine persönliche Zusammenfassung der letzten 7 Tage auf LONGEVITY.</p>

@@ -350,7 +350,7 @@ export async function accountRoutes(app: FastifyInstance) {
     }
 
     const ok = await verifyPassword(user.passwordHash, body.password);
-    if (!ok) return reply.status(401).send({ title: 'Falsches Passwort.' });
+    if (!ok) return reply.status(403).send({ title: 'Das eingegebene Passwort ist nicht korrekt.' });
 
     // Destroy the current session first so the cookie is cleared
     await req.session.destroy();

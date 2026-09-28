@@ -28,6 +28,8 @@ export interface MailMessage {
   to: string;
   subject: string;
   html: string;
+  /** Plaintext fallback — required for spam filter compliance (Gmail, SpamAssassin MIME_HTML_ONLY rule) */
+  text: string;
 }
 
 export async function sendMail(message: MailMessage): Promise<void> {
@@ -40,5 +42,6 @@ export async function sendMail(message: MailMessage): Promise<void> {
     to: message.to,
     subject: message.subject,
     html: message.html,
+    text: message.text,
   });
 }
