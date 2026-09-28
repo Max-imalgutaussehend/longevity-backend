@@ -11,7 +11,7 @@ import { parseFhirBundle } from '../adapters/fhir.js';
 import { parseWithingsMeasures, parseWithingsActivity, parseWithingsSleep } from '../adapters/withings.js';
 import { parseGoogleFitAggregate, parseGoogleHealthV4DataPoints } from '../adapters/googleFit.js';
 import { parseOuraSleep, parseOuraReadiness, parseOuraActivity } from '../adapters/oura.js';
-import { countStrengthSessions, zone2MinutesFromZones } from '../adapters/strava.js';
+import { countStrengthSessions, zone2MinutesPerWeek } from '../adapters/strava.js';
 import { computeScore } from '../score/index.js';
 import type { Sample } from '../score/types.js';
 
@@ -171,7 +171,7 @@ describe.skipIf(!HAS_DB)('Sources End-to-End Integration Suite — All 8 Adapter
           data: [{ date: '2026-09-14 18:00:00', qty: 10420 }],
         },
         {
-          name: 'HeartRate',
+          name: 'RestingHeartRate',
           units: 'bpm',
           data: [{ date: '2026-09-14 08:30:00', qty: 58 }],
         },
@@ -471,18 +471,20 @@ describe.skipIf(!HAS_DB)('Sources End-to-End Integration Suite — All 8 Adapter
     const user = await createTestUser('strava');
     const rawActivities = JSON.parse(readFileSync(resolve(fixturesDir, 'strava_activities.json'), 'utf-8'));
     const strengthSamples = countStrengthSessions(rawActivities);
-    const zone2Sample = zone2MinutesFromZones({
-      heart_rate: {
-        distribution_buckets: [
-          { min: 0, max: 110, time: 300 },
-          { min: 110, max: 135, time: 2400 }, // 40 minutes in Zone 2
-          { min: 135, max: 160, time: 600 },
-        ],
+    const zone2Samples = zone2MinutesPerWeek([{
+      startDate: '2024-06-04T07:00:00Z',
+      zones: {
+        heart_rate: {
+          distribution_buckets: [
+            { min: 0, max: 110, time: 300 },
+            { min: 110, max: 135, time: 2400 }, // 40 minutes in Zone 2
+            { min: 135, max: 160, time: 600 },
+          ],
+        },
       },
-    }, '2024-06-04T07:00:00Z');
+    }]);
 
-    const allSamples = [...strengthSamples];
-    if (zone2Sample) allSamples.push(zone2Sample);
+    const allSamples = [...strengthSamples, ...zone2Samples];
 
     expect(allSamples.length).toBeGreaterThanOrEqual(2);
     expect(allSamples.some(s => s.metric === 'strength_sessions')).toBe(true);

@@ -20,16 +20,20 @@ interface StravaZonesResponse {
   heart_rate?: { distribution_buckets: StravaZoneBucket[] };
 }
 
+function weekStartIso(dateStr: string): string {
+  const date = new Date(dateStr);
+  const weekStart = new Date(date);
+  weekStart.setUTCDate(date.getUTCDate() - date.getUTCDay());
+  weekStart.setUTCHours(0, 0, 0, 0);
+  return weekStart.toISOString();
+}
+
 export function countStrengthSessions(activities: StravaActivity[]): Sample[] {
   const byWeek = new Map<string, number>();
 
   for (const activity of activities) {
     if (!STRENGTH_TYPES.has(activity.type)) continue;
-    const date = new Date(activity.start_date);
-    const weekStart = new Date(date);
-    weekStart.setUTCDate(date.getUTCDate() - date.getUTCDay());
-    weekStart.setUTCHours(0, 0, 0, 0);
-    const key = weekStart.toISOString();
+    const key = weekStartIso(activity.start_date);
     byWeek.set(key, (byWeek.get(key) ?? 0) + 1);
   }
 
@@ -42,18 +46,32 @@ export function countStrengthSessions(activities: StravaActivity[]): Sample[] {
   }));
 }
 
-export function zone2MinutesFromZones(zones: StravaZonesResponse, measuredAt: string): Sample | null {
-  const buckets = zones.heart_rate?.distribution_buckets;
-  if (!buckets || !buckets[ZONE2_INDEX]) return null;
+interface Zone2Activity {
+  startDate: string;
+  zones: StravaZonesResponse;
+}
 
-  const seconds = buckets[ZONE2_INDEX].time;
-  return {
-    metric: 'zone2_minutes',
-    value: seconds / 60,
+// Aggregates zone-2 minutes per calendar week (analogous to
+// countStrengthSessions) instead of one sample per activity — computeScore
+// takes only the latest sample per metric, so per-activity samples silently
+// discarded every workout but the most recent one in the sync window.
+export function zone2MinutesPerWeek(activities: Zone2Activity[]): Sample[] {
+  const secondsByWeek = new Map<string, number>();
+
+  for (const { startDate, zones } of activities) {
+    const buckets = zones.heart_rate?.distribution_buckets;
+    if (!buckets || !buckets[ZONE2_INDEX]) continue;
+    const key = weekStartIso(startDate);
+    secondsByWeek.set(key, (secondsByWeek.get(key) ?? 0) + buckets[ZONE2_INDEX].time);
+  }
+
+  return [...secondsByWeek.entries()].map(([weekStart, seconds]) => ({
+    metric: 'zone2_minutes' as const,
+    value: Math.round((seconds / 60) * 10) / 10,
     unit: 'min',
-    measuredAt,
-    sourceKind: 'strava',
-  };
+    measuredAt: weekStart,
+    sourceKind: 'strava' as const,
+  }));
 }
 
 export async function fetchStravaSamples(accessToken: string, sinceEpochSeconds: number): Promise<Sample[]> {
@@ -68,15 +86,13 @@ export async function fetchStravaSamples(accessToken: string, sinceEpochSeconds:
   const samples: Sample[] = countStrengthSessions(activities);
 
   const withHr = activities.filter((a) => a.has_heartrate);
-  const zoneSamples = await Promise.all(withHr.map(async (activity) => {
+  const zone2Activities = await Promise.all(withHr.map(async (activity) => {
     const res = await fetch(`https://www.strava.com/api/v3/activities/${activity.id}/zones`, { headers });
     const zones = await res.json() as StravaZonesResponse;
-    return zone2MinutesFromZones(zones, activity.start_date);
+    return { startDate: activity.start_date, zones };
   }));
 
-  for (const sample of zoneSamples) {
-    if (sample) samples.push(sample);
-  }
+  samples.push(...zone2MinutesPerWeek(zone2Activities));
 
   return samples;
 }

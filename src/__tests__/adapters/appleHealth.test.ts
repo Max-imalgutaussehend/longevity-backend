@@ -21,6 +21,8 @@ describe('parseAppleHealthXml with apple_health_mini.xml fixture', () => {
     expect(vo2max[0].value).toBe(48.5);
     expect(vo2max[0].unit).toBe('ml/kg/min');
 
+    // Only HKQuantityTypeIdentifierRestingHeartRate maps to resting_hr — the
+    // ambient 180 bpm workout-level HeartRate record must not leak in.
     const restingHr = samples.filter((s) => s.metric === 'resting_hr');
     expect(restingHr).toHaveLength(1);
     expect(restingHr[0].value).toBe(58);
@@ -36,6 +38,8 @@ describe('parseAppleHealthXml with apple_health_mini.xml fixture', () => {
     expect(hrv[0].value).toBe(65);
     expect(hrv[0].unit).toBe('ms');
 
+    // Two step chunks on the same day (6000 + 2500) must be summed into one
+    // daily sample, not overwritten by the last chunk.
     const steps = samples.filter((s) => s.metric === 'steps');
     expect(steps).toHaveLength(1);
     expect(steps[0].value).toBe(8500);
@@ -129,5 +133,69 @@ describe('parseAppleHealthXml edge cases and variations', () => {
     const sleepConsistency = samples.filter((s) => s.metric === 'sleep_consistency');
     expect(sleepDuration).toHaveLength(1);
     expect(sleepConsistency).toHaveLength(0);
+  });
+
+  // Regression tests for #96: momentary HeartRate must not overwrite
+  // resting_hr, step chunks must sum per day, zone2_minutes must aggregate
+  // per calendar week.
+  it('does not map ambient/workout HeartRate records to resting_hr', async () => {
+    const xml = `
+      <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="bpm" value="180" startDate="2026-09-01 12:00:00 +0200" endDate="2026-09-01 12:00:00 +0200"/>
+    `;
+    const samples = await parseAppleHealthXml(streamFromXml(xml));
+    expect(samples.filter((s) => s.metric === 'resting_hr')).toHaveLength(0);
+  });
+
+  it('sums step chunks across a day instead of taking the last chunk', async () => {
+    const xml = `
+      <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Apple Watch" unit="count" value="30" startDate="2026-09-01 08:00:00 +0200" endDate="2026-09-01 08:10:00 +0200"/>
+      <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Apple Watch" unit="count" value="70" startDate="2026-09-01 08:10:00 +0200" endDate="2026-09-01 08:20:00 +0200"/>
+      <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Apple Watch" unit="count" value="20" startDate="2026-09-01 20:00:00 +0200" endDate="2026-09-01 20:05:00 +0200"/>
+    `;
+    const samples = await parseAppleHealthXml(streamFromXml(xml));
+    const steps = samples.filter((s) => s.metric === 'steps');
+    expect(steps).toHaveLength(1);
+    expect(steps[0].value).toBe(120);
+  });
+
+  it('keeps step totals separate per calendar day', async () => {
+    const xml = `
+      <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Apple Watch" unit="count" value="100" startDate="2026-09-01 08:00:00 +0200" endDate="2026-09-01 08:10:00 +0200"/>
+      <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Apple Watch" unit="count" value="200" startDate="2026-09-02 08:00:00 +0200" endDate="2026-09-02 08:10:00 +0200"/>
+    `;
+    const samples = await parseAppleHealthXml(streamFromXml(xml));
+    const steps = samples.filter((s) => s.metric === 'steps');
+    expect(steps).toHaveLength(2);
+    expect(steps.map((s) => s.value).sort((a, b) => a - b)).toEqual([100, 200]);
+  });
+
+  it('aggregates zone2_minutes across multiple qualifying workouts in the same calendar week', async () => {
+    // 2026-09-07 and 2026-09-09 are both in the week starting Sunday 2026-09-06.
+    const xml = `
+      <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="30" durationUnit="min" startDate="2026-09-07 07:00:00 +0200" endDate="2026-09-07 07:30:00 +0200">
+        <MetadataEntry key="HKAverageHeartRate" value="125 count/min"/>
+      </Workout>
+      <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="20" durationUnit="min" startDate="2026-09-09 07:00:00 +0200" endDate="2026-09-09 07:20:00 +0200">
+        <MetadataEntry key="HKAverageHeartRate" value="125 count/min"/>
+      </Workout>
+    `;
+    const samples = await parseAppleHealthXml(streamFromXml(xml));
+    const zone2 = samples.filter((s) => s.metric === 'zone2_minutes');
+    expect(zone2).toHaveLength(1);
+    expect(zone2[0].value).toBe(50);
+  });
+
+  it('keeps zone2_minutes separate across different calendar weeks', async () => {
+    const xml = `
+      <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="30" durationUnit="min" startDate="2026-09-07 07:00:00 +0200" endDate="2026-09-07 07:30:00 +0200">
+        <MetadataEntry key="HKAverageHeartRate" value="125 count/min"/>
+      </Workout>
+      <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="20" durationUnit="min" startDate="2026-09-14 07:00:00 +0200" endDate="2026-09-14 07:20:00 +0200">
+        <MetadataEntry key="HKAverageHeartRate" value="125 count/min"/>
+      </Workout>
+    `;
+    const samples = await parseAppleHealthXml(streamFromXml(xml));
+    const zone2 = samples.filter((s) => s.metric === 'zone2_minutes');
+    expect(zone2).toHaveLength(2);
   });
 });

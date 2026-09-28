@@ -4,7 +4,7 @@ import { parseHealthAutoExport } from '../../adapters/healthAutoExport.js';
 describe('parseHealthAutoExport — sourceKind fix', () => {
   it('tags every sample with sourceKind health_auto_export, not apple_health', () => {
     const samples = parseHealthAutoExport([
-      { name: 'HeartRate', units: 'bpm', data: [{ date: '2024-06-01T07:00:00Z', qty: 55 }] },
+      { name: 'RestingHeartRate', units: 'bpm', data: [{ date: '2024-06-01T07:00:00Z', qty: 55 }] },
       { name: 'StepCount', units: 'count', data: [{ date: '2024-06-01T00:00:00Z', qty: 8000 }] },
     ]);
 
@@ -14,9 +14,9 @@ describe('parseHealthAutoExport — sourceKind fix', () => {
 });
 
 describe('parseHealthAutoExport — existing mappings still work', () => {
-  it('maps HeartRate and StepCount', () => {
+  it('maps RestingHeartRate and StepCount', () => {
     const samples = parseHealthAutoExport([
-      { name: 'HeartRate', units: 'bpm', data: [{ date: '2024-06-01T07:00:00Z', qty: 55 }] },
+      { name: 'RestingHeartRate', units: 'bpm', data: [{ date: '2024-06-01T07:00:00Z', qty: 55 }] },
       { name: 'StepCount', units: 'count', data: [{ date: '2024-06-01T00:00:00Z', qty: 8000 }] },
     ]);
 
@@ -51,6 +51,40 @@ describe('parseHealthAutoExport — sleep_consistency', () => {
   });
 });
 
+describe('parseHealthAutoExport — StepCount aggregation (#96)', () => {
+  it('sums step chunks per calendar day instead of taking the last chunk', () => {
+    const samples = parseHealthAutoExport([
+      { name: 'StepCount', units: 'count', data: [
+        { date: '2024-06-01T08:00:00Z', qty: 30 },
+        { date: '2024-06-01T14:00:00Z', qty: 70 },
+        { date: '2024-06-01T20:00:00Z', qty: 20 },
+      ] },
+    ]);
+    const steps = samples.filter((s) => s.metric === 'steps');
+    expect(steps).toHaveLength(1);
+    expect(steps[0].value).toBe(120);
+  });
+
+  it('keeps step totals separate per calendar day', () => {
+    const samples = parseHealthAutoExport([
+      { name: 'StepCount', units: 'count', data: [
+        { date: '2024-06-01T08:00:00Z', qty: 100 },
+        { date: '2024-06-02T08:00:00Z', qty: 200 },
+      ] },
+    ]);
+    const steps = samples.filter((s) => s.metric === 'steps');
+    expect(steps).toHaveLength(2);
+    expect(steps.map((s) => s.value).sort((a, b) => a - b)).toEqual([100, 200]);
+  });
+
+  it('does not map ambient HeartRate to resting_hr', () => {
+    const samples = parseHealthAutoExport([
+      { name: 'HeartRate', units: 'bpm', data: [{ date: '2024-06-01T12:00:00Z', qty: 180 }] },
+    ]);
+    expect(samples.filter((s) => s.metric === 'resting_hr')).toHaveLength(0);
+  });
+});
+
 describe('parseHealthAutoExport — zone2_minutes from ActiveEnergyBurned + HeartRate workouts', () => {
   it('sums duration of workouts whose average HR falls in the 60-70% HRmax band', () => {
     const samples = parseHealthAutoExport({
@@ -73,6 +107,23 @@ describe('parseHealthAutoExport — zone2_minutes from ActiveEnergyBurned + Hear
       workouts: [{ name: 'Cycling', start: '2024-06-02T07:00:00Z', duration: 1800, heartRateAvg: 165 }],
     } as never);
     expect(samples.filter((s) => s.metric === 'zone2_minutes')).toHaveLength(0);
+  });
+
+  it('aggregates zone2_minutes per calendar week instead of blending multiple weeks into one sample (#96)', () => {
+    const samples = parseHealthAutoExport({
+      metrics: [],
+      workouts: [
+        { name: 'Running', start: '2024-06-04T07:00:00Z', duration: 1200, heartRateAvg: 125 }, // week of 2024-06-02
+        { name: 'Running', start: '2024-06-06T07:00:00Z', duration: 1200, heartRateAvg: 125 }, // same week
+        { name: 'Running', start: '2024-06-11T07:00:00Z', duration: 1800, heartRateAvg: 125 }, // week of 2024-06-09
+      ],
+    } as never);
+
+    const zone2 = samples.filter((s) => s.metric === 'zone2_minutes');
+    expect(zone2).toHaveLength(2);
+    const values = zone2.map((s) => s.value).sort((a, b) => a - b);
+    expect(values[0]).toBeCloseTo(30, 5); // week 2: 1800s
+    expect(values[1]).toBeCloseTo(40, 5); // week 1: 1200s + 1200s
   });
 });
 

@@ -7,10 +7,14 @@
 
   <!-- Existing Record mappings -->
   <Record type="HKQuantityTypeIdentifierVO2Max" sourceName="Apple Watch" unit="ml/kg/min" value="48.5" startDate="2026-09-01 08:00:00 +0200" endDate="2026-09-01 08:00:00 +0200"/>
-  <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="bpm" value="58" startDate="2026-09-01 08:05:00 +0200" endDate="2026-09-01 08:05:00 +0200"/>
+  <Record type="HKQuantityTypeIdentifierRestingHeartRate" sourceName="Apple Watch" unit="bpm" value="58" startDate="2026-09-01 08:05:00 +0200" endDate="2026-09-01 08:05:00 +0200"/>
+  <!-- Ambient (non-resting) heart rate, including a workout-level spike — must NOT be mapped to resting_hr -->
+  <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="bpm" value="180" startDate="2026-09-01 12:00:00 +0200" endDate="2026-09-01 12:00:00 +0200"/>
   <Record type="HKQuantityTypeIdentifierWaistCircumference" sourceName="Health" unit="cm" value="82" startDate="2026-09-01 08:10:00 +0200" endDate="2026-09-01 08:10:00 +0200"/>
   <Record type="HKQuantityTypeIdentifierHeartRateVariabilitySDNN" sourceName="Apple Watch" unit="ms" value="65" startDate="2026-09-01 08:15:00 +0200" endDate="2026-09-01 08:15:00 +0200"/>
-  <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Apple Watch" unit="count" value="8500" startDate="2026-09-01 08:00:00 +0200" endDate="2026-09-01 20:00:00 +0200"/>
+  <!-- Step chunks on the same day must be summed, not overwritten by the last chunk -->
+  <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Apple Watch" unit="count" value="6000" startDate="2026-09-01 08:00:00 +0200" endDate="2026-09-01 12:00:00 +0200"/>
+  <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Apple Watch" unit="count" value="2500" startDate="2026-09-01 12:00:00 +0200" endDate="2026-09-01 20:00:00 +0200"/>
 
   <!-- Blood Pressure HKCorrelation -->
   <Correlation type="HKCorrelationTypeIdentifierBloodPressure" sourceName="Withings" startDate="2026-09-02 08:30:00 +0200" endDate="2026-09-02 08:30:00 +0200">
