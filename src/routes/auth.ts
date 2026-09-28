@@ -131,7 +131,7 @@ export async function authRoutes(app: FastifyInstance) {
       rateLimit: {
         max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 200 : 5,
         timeWindow: '15 minutes',
-        errorResponseBuilder: () => ({ title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
+        errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
       },
     },
   }, async (req, reply) => {
@@ -213,7 +213,7 @@ export async function authRoutes(app: FastifyInstance) {
       rateLimit: {
         max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 200 : 10,
         timeWindow: '15 minutes',
-        errorResponseBuilder: () => ({ title: 'Zu viele Login-Versuche. Bitte in 15 Minuten erneut versuchen.' }),
+        errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Login-Versuche. Bitte in 15 Minuten erneut versuchen.' }),
       },
     },
   }, async (req, reply) => {

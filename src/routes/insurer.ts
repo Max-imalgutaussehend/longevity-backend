@@ -270,7 +270,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       rateLimit: {
         max: 5,
         timeWindow: '15 minutes',
-        errorResponseBuilder: () => ({ title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
+        errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
       },
     },
   }, async (req, reply) => {

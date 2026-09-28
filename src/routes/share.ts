@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { eq, desc, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
+import { env } from '../env.js';
 import { shareTokens, type ShareTokenMetadata } from '../db/schema.js';
 import { computeScore } from '../score/index.js';
 import {
@@ -142,7 +143,15 @@ export async function shareRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get('/verify/:id', async (req) => {
+  app.get('/verify/:id', {
+    config: {
+      rateLimit: {
+        max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 200 : 30,
+        timeWindow: '1 minute',
+        errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Anfragen. Bitte in einer Minute erneut versuchen.' }),
+      },
+    },
+  }, async (req) => {
     const { id } = req.params as { id: string };
     const [token] = await db.select().from(shareTokens).where(eq(shareTokens.id, id)).limit(1);
 
