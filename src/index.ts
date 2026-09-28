@@ -1,3 +1,7 @@
+// Sentry must be initialised before any other imports for full OTel coverage
+import { initSentry, captureException } from './lib/sentry.js';
+initSentry();
+
 import { buildApp } from './app.js';
 import { CURRENT_HEALTH_DATA_CONSENT_VERSION, HEALTH_DATA_CONSENT_TEXT } from './lib/consent.js';
 import { env } from './env.js';
@@ -23,6 +27,7 @@ const start = async () => {
     await app.listen({ port: 3000, host: '0.0.0.0' });
   } catch (err) {
     app.log.error(err);
+    captureException(err);
     process.exit(1);
   }
 };

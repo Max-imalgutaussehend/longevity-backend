@@ -16,12 +16,24 @@ import { sourcesRoutes } from './routes/sources.js';
 import { reportRoutes } from './routes/reports.js';
 import { shareRoutes } from './routes/share.js';
 import { insurerRoutes } from './routes/insurer.js';
+import { captureException } from './lib/sentry.js';
 import './types.js';
 
 export async function buildApp() {
   const app = Fastify({
     logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
     trustProxy: true,
+  });
+
+  // ── Global error hook: forward 5xx errors to Sentry ─────────────────────────
+  app.setErrorHandler((error, request, reply) => {
+    const statusCode = error.statusCode ?? 500;
+    if (statusCode >= 500) {
+      captureException(error, {
+        adapter: (request.routerPath ?? '').split('/')[3], // e.g. /api/sources/sync → 'sync'
+      });
+    }
+    reply.status(statusCode).send({ title: error.message });
   });
 
   await app.register(rateLimit, { global: false });
