@@ -342,6 +342,118 @@
           },
           "daysRemaining": {
             "type": "integer"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "claimStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "submitted",
+              "accepted",
+              "rejected",
+              null
+            ]
+          },
+          "claimSubmittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "BenefitClaim": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "submittedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitted",
+              "accepted",
+              "rejected"
+            ]
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InsurerClaim": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "bandLow",
+          "bandHigh",
+          "submittedAt",
+          "offerTitle",
+          "userEmail",
+          "verifyUrl"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitted",
+              "accepted",
+              "rejected"
+            ]
+          },
+          "bandLow": {
+            "type": "integer"
+          },
+          "bandHigh": {
+            "type": "integer"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "offerTitle": {
+            "type": "string"
+          },
+          "userEmail": {
+            "type": "string",
+            "format": "email"
+          },
+          "userDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verifyUrl": {
+            "type": "string"
           }
         }
       },
@@ -2761,6 +2873,143 @@
         "responses": {
           "200": {
             "description": "PartnerOffer[]"
+          }
+        }
+      }
+    },
+    "/offers/{id}/claim": {
+      "post": {
+        "operationId": "submitBenefitClaim",
+        "tags": [
+          "Offers"
+        ],
+        "summary": "Submit a qualified offer directly to its issuing insurer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenefitClaim"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Offer has no organization, or holding requirements not met"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Offer not found"
+          },
+          "409": {
+            "description": "An active (submitted or accepted) claim already exists for this offer"
+          }
+        }
+      }
+    },
+    "/insurer/claims": {
+      "get": {
+        "operationId": "listInsurerClaims",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "List benefit claims submitted to the organization",
+        "responses": {
+          "200": {
+            "description": "InsurerClaim[]",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InsurerClaim"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not an insurer role"
+          },
+          "404": {
+            "description": "No organization assigned"
+          }
+        }
+      }
+    },
+    "/insurer/claims/{id}/decide": {
+      "post": {
+        "operationId": "decideInsurerClaim",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "Accept or reject a submitted benefit claim",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "decision"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "accepted",
+                      "rejected"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Decided"
+          },
+          "400": {
+            "description": "Invalid decision"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not an insurer role"
+          },
+          "404": {
+            "description": "Claim not found or not owned by this organization"
+          },
+          "409": {
+            "description": "Already decided"
           }
         }
       }

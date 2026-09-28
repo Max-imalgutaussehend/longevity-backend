@@ -16,7 +16,15 @@ import '../../types.js';
 const QUESTIONNAIRE_METRICS = new Set(['smoking', 'alcohol_units']);
 
 export async function sourcesImportRoutes(app: FastifyInstance) {
-  app.post('/sources/apple-health/upload', async (req, reply) => {
+  app.post('/sources/apple-health/upload', {
+    config: {
+      rateLimit: {
+        max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 200 : 5,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Uploads. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
 

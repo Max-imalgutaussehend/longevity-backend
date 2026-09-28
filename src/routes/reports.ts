@@ -106,7 +106,19 @@ export async function reportRoutes(app: FastifyInstance) {
     return computeWeeklyReport(user);
   });
 
-  app.post('/send', async (req, reply) => {
+  app.post('/send', {
+    config: {
+      rateLimit: {
+        max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 200 : 2,
+        timeWindow: '1 hour',
+        // Per-user (not per-IP) since a shared/office IP shouldn't throttle
+        // every user's own report quota together. Falls back to IP for
+        // unauthenticated callers, who get rejected by requireUser anyway.
+        keyGenerator: (req) => req.session.userId ?? req.ip,
+        errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Berichte angefordert. Bitte in einer Stunde erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
 

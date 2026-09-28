@@ -119,6 +119,7 @@ export async function scoreRoutes(app: FastifyInstance) {
         max: 30,
         timeWindow: '1 minute',
         errorResponseBuilder: () => ({
+          statusCode: 429,
           type: 'about:blank',
           title: 'Rate-Limit überschritten.',
           status: 429,

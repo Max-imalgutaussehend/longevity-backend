@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { eq, desc, and, inArray } from 'drizzle-orm';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { hashPassword } from '../lib/password.js';
 import { db } from '../db/client.js';
 import {
@@ -10,13 +10,17 @@ import {
   partnerOffers,
   insurerRequests,
   emailTokens,
+  benefitClaims,
+  shareTokens,
+  type ShareTokenMetadata,
 } from '../db/schema.js';
 import { env } from '../env.js';
 import { computeScore, evaluateHoldingPeriod, type SnapshotHistoryItem } from '../score/index.js';
 import { issueEmailToken } from '../lib/emailTokens.js';
 import { sendMail } from '../lib/mail.js';
 import { insurerInviteTemplate, insurerRequestReceivedTemplate } from '../lib/emailTemplates.js';
-import { requireRole, getUserSamples } from './helpers.js';
+import { requireRole, requireUser, getUserSamples, getVerifiedUserSamples } from './helpers.js';
+import { signTokenPayload, buildTokenPayload, getActivePrivateKey } from '../lib/signing.js';
 import '../types.js';
 
 export async function insurerRoutes(app: FastifyInstance) {
@@ -82,6 +86,7 @@ export async function insurerRoutes(app: FastifyInstance) {
 
     let band = { low: 0, high: 100 };
     let snapshots: SnapshotHistoryItem[] = [];
+    const claimByOfferId = new Map<string, { status: string; submittedAt: Date }>();
     if (userId) {
       const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
       if (user) {
@@ -98,6 +103,18 @@ export async function insurerRoutes(app: FastifyInstance) {
         }).from(scoreSnapshots)
           .where(eq(scoreSnapshots.userId, userId))
           .orderBy(desc(scoreSnapshots.computedFor));
+
+        const claims = await db.select({
+          offerId: benefitClaims.offerId,
+          status: benefitClaims.status,
+          submittedAt: benefitClaims.submittedAt,
+        }).from(benefitClaims)
+          .where(eq(benefitClaims.userId, userId))
+          .orderBy(desc(benefitClaims.submittedAt));
+        // Most recent claim per offer wins (a rejected claim can be resubmitted).
+        for (const c of claims) {
+          if (!claimByOfferId.has(c.offerId)) claimByOfferId.set(c.offerId, c);
+        }
       }
     }
 
@@ -111,8 +128,10 @@ export async function insurerRoutes(app: FastifyInstance) {
           snapshots,
           now,
         });
+        const claim = claimByOfferId.get(o.id);
         return {
           id: o.id,
+          organizationId: o.organizationId,
           partnerName: o.partnerName,
           title: o.title,
           description: o.description,
@@ -123,6 +142,8 @@ export async function insurerRoutes(app: FastifyInstance) {
           qualified: holding.qualified,
           daysHeld: holding.daysHeld,
           daysRemaining: holding.daysRemaining,
+          claimStatus: claim?.status ?? null,
+          claimSubmittedAt: claim?.submittedAt.toISOString() ?? null,
         };
       });
   };
@@ -265,12 +286,173 @@ export async function insurerRoutes(app: FastifyInstance) {
     return reply.status(204).send();
   });
 
+  app.post('/offers/:id/claim', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { id: offerId } = req.params as { id: string };
+    const [offer] = await db.select().from(partnerOffers).where(eq(partnerOffers.id, offerId)).limit(1);
+    if (!offer) return reply.status(404).send({ title: 'Angebot nicht gefunden.' });
+    if (!offer.organizationId) {
+      return reply.status(400).send({ title: 'Dieses Angebot unterstützt keine direkte Einreichung.' });
+    }
+
+    const now = new Date();
+    const userSamples = await getUserSamples(user.id);
+    const score = computeScore({
+      profile: { birthDate: user.birthDate, sex: user.sex as 'm' | 'f' },
+      samples: userSamples,
+      now,
+    });
+    const snapshots = await db.select({
+      computedFor: scoreSnapshots.computedFor,
+      score: scoreSnapshots.score,
+    }).from(scoreSnapshots)
+      .where(eq(scoreSnapshots.userId, user.id))
+      .orderBy(desc(scoreSnapshots.computedFor));
+
+    const holding = evaluateHoldingPeriod({
+      currentBand: score.band,
+      minBand: offer.minBand,
+      minMonths: offer.minMonths,
+      snapshots,
+      now,
+    });
+    if (!holding.qualified) {
+      return reply.status(400).send({ title: 'Anspruchsvoraussetzungen für dieses Angebot sind nicht erfüllt.' });
+    }
+
+    const [existingActive] = await db.select().from(benefitClaims)
+      .where(and(
+        eq(benefitClaims.userId, user.id),
+        eq(benefitClaims.offerId, offerId),
+        inArray(benefitClaims.status, ['submitted', 'accepted']),
+      ))
+      .limit(1);
+    if (existingActive) {
+      return reply.status(409).send({ title: 'Für dieses Angebot liegt bereits eine Einreichung vor.' });
+    }
+
+    const sampleData = await getVerifiedUserSamples(user.id);
+    const privateKey = getActivePrivateKey();
+    if (!privateKey) return reply.status(500).send({ title: 'Signierschlüssel nicht konfiguriert.' });
+
+    const tokenId = randomUUID();
+    const issuedAt = now;
+    const expiresAt = new Date(issuedAt.getTime() + 90 * 24 * 60 * 60 * 1000);
+    const payload = buildTokenPayload(tokenId, score.band.low, score.band.high, expiresAt.toISOString());
+    const signature = signTokenPayload(payload, privateKey);
+    const metadata: ShareTokenMetadata = {
+      verifiedOnly: false,
+      trustLevel: sampleData.trustLevel,
+      verifiedSources: sampleData.verifiedSources,
+      totalSampleCount: sampleData.totalSampleCount,
+      excludedSampleCount: sampleData.excludedSampleCount,
+      activeDays: sampleData.activeDays,
+      certificateType: 'Standard Score-Nachweis',
+    };
+
+    await db.insert(shareTokens).values({
+      id: tokenId,
+      userId: user.id,
+      bandLow: score.band.low,
+      bandHigh: score.band.high,
+      issuedAt,
+      expiresAt,
+      signature,
+      metadata,
+    });
+
+    const [claim] = await db.insert(benefitClaims).values({
+      userId: user.id,
+      offerId,
+      organizationId: offer.organizationId,
+      shareTokenId: tokenId,
+      bandLow: score.band.low,
+      bandHigh: score.band.high,
+    }).returning();
+
+    return reply.status(201).send({
+      id: claim.id,
+      status: claim.status,
+      submittedAt: claim.submittedAt.toISOString(),
+    });
+  });
+
+  app.get('/insurer/claims', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const rows = await db.select({
+      id: benefitClaims.id,
+      status: benefitClaims.status,
+      bandLow: benefitClaims.bandLow,
+      bandHigh: benefitClaims.bandHigh,
+      submittedAt: benefitClaims.submittedAt,
+      decidedAt: benefitClaims.decidedAt,
+      shareTokenId: benefitClaims.shareTokenId,
+      offerTitle: partnerOffers.title,
+      userEmail: users.email,
+      userDisplayName: users.displayName,
+    }).from(benefitClaims)
+      .innerJoin(partnerOffers, eq(benefitClaims.offerId, partnerOffers.id))
+      .innerJoin(users, eq(benefitClaims.userId, users.id))
+      .where(eq(benefitClaims.organizationId, user.organizationId))
+      .orderBy(desc(benefitClaims.submittedAt));
+
+    return rows.map(r => ({
+      id: r.id,
+      status: r.status,
+      bandLow: r.bandLow,
+      bandHigh: r.bandHigh,
+      submittedAt: r.submittedAt.toISOString(),
+      decidedAt: r.decidedAt?.toISOString() ?? null,
+      offerTitle: r.offerTitle,
+      userEmail: r.userEmail,
+      userDisplayName: r.userDisplayName,
+      verifyUrl: `/verify/${r.shareTokenId}`,
+    }));
+  });
+
+  app.post('/insurer/claims/:id/decide', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const { id } = req.params as { id: string };
+    const body = req.body as { decision?: 'accepted' | 'rejected' };
+    if (body.decision !== 'accepted' && body.decision !== 'rejected') {
+      return reply.status(400).send({ title: 'Ungültige Entscheidung.' });
+    }
+
+    const [existing] = await db.select().from(benefitClaims)
+      .where(and(eq(benefitClaims.id, id), eq(benefitClaims.organizationId, user.organizationId)))
+      .limit(1);
+    if (!existing) return reply.status(404).send({ title: 'Einreichung nicht gefunden.' });
+    if (existing.status !== 'submitted') {
+      return reply.status(409).send({ title: 'Über diese Einreichung wurde bereits entschieden.' });
+    }
+
+    const [updated] = await db.update(benefitClaims).set({
+      status: body.decision,
+      decidedAt: new Date(),
+      decidedBy: user.id,
+    }).where(eq(benefitClaims.id, id)).returning();
+
+    return {
+      id: updated.id,
+      status: updated.status,
+      decidedAt: updated.decidedAt?.toISOString() ?? null,
+    };
+  });
+
   app.post('/contact/insurer', {
     config: {
       rateLimit: {
         max: 5,
         timeWindow: '15 minutes',
-        errorResponseBuilder: () => ({ title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
+        errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
       },
     },
   }, async (req, reply) => {
