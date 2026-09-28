@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
+import { z } from 'zod';
 import { env } from '../env.js';
 import { db } from '../db/client.js';
 import { users, organizations } from '../db/schema.js';
@@ -12,40 +13,71 @@ import { requireUser } from './helpers.js';
 import { setCsrfCookies, clearCsrfCookies } from '../lib/csrf.js';
 import '../types.js';
 
+export const registerSchema = z.object({
+  email: z.string().email('Ungültige E-Mail-Adresse.'),
+  password: passwordSchema,
+  birthDate: z.string().refine((val) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) return false;
+    const d = new Date(val + 'T00:00:00Z');
+    if (isNaN(d.getTime())) return false;
+    const year = d.getUTCFullYear();
+    if (year < 1900) return false;
+    const now = new Date();
+    if (d > now) return false;
+    const minAgeDate = new Date(Date.UTC(now.getUTCFullYear() - 16, now.getUTCMonth(), now.getUTCDate()));
+    return d <= minAgeDate;
+  }, {
+    message: 'Ungültiges Geburtsdatum. Das Mindestalter beträgt 16 Jahre (Geburtsjahr ab 1900).',
+  }),
+  sex: z.enum(['m', 'f'], { errorMap: () => ({ message: 'Ungültiges Geschlecht.' }) }),
+  displayName: z.string().max(100).optional(),
+});
+
 export async function authRoutes(app: FastifyInstance) {
   app.get('/csrf', async (req, reply) => {
     const csrfToken = setCsrfCookies(reply);
     return { csrfToken };
   });
-  app.post('/register', async (req, reply) => {
-    const body = req.body as { email?: string; password?: string; birthDate?: string; sex?: string; displayName?: string };
-    const { email, password, birthDate, sex, displayName } = body;
+  app.post('/register', {
+    config: {
+      rateLimit: {
+        max: env.NODE_ENV === 'test' ? 50 : 5,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Registrierungsversuche. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
+    const rawBody = (req.body as Record<string, unknown>) || {};
+    const { email, password, birthDate, sex } = rawBody as { email?: string; password?: string; birthDate?: string; sex?: string };
 
     if (!email || !password || !birthDate || !sex) {
       return reply.status(400).send({ title: 'Pflichtfelder fehlen.' });
     }
-    const pwResult = passwordSchema.safeParse(password);
-    if (!pwResult.success) {
-      return reply.status(400).send({ title: pwResult.error.issues[0]?.message ?? 'Passwort entspricht nicht den Anforderungen.' });
-    }
-    if (isWeakPassword(password)) {
-      return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
-    }
-    if (sex !== 'm' && sex !== 'f') {
-      return reply.status(400).send({ title: 'Ungültiges Geschlecht.' });
+
+    const parseResult = registerSchema.safeParse(rawBody);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        title: parseResult.error.issues[0]?.message ?? 'Ungültige Registrierungsdaten.',
+      });
     }
 
-    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+    const { email: cleanEmail, password: cleanPassword, birthDate: cleanBirthDate, sex: cleanSex, displayName } = parseResult.data;
+
+    if (isWeakPassword(cleanPassword)) {
+      return reply.status(400).send({ title: 'Dieses Passwort ist zu häufig. Bitte wähle ein sichereres Passwort.' });
+    }
+
+    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, cleanEmail)).limit(1);
     if (existing.length > 0) {
       return reply.status(409).send({ title: 'E-Mail bereits vergeben.' });
     }
 
-    const passwordHash = await hashPassword(password);
+    const passwordHash = await hashPassword(cleanPassword);
     const [user] = await db.insert(users).values({
-      email,
+      email: cleanEmail,
       passwordHash,
-      birthDate,
-      sex,
+      birthDate: cleanBirthDate,
+      sex: cleanSex,
       displayName: displayName ?? null,
     }).returning();
 

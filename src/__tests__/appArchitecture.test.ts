@@ -82,6 +82,54 @@ describe('Application Factory & Route Plugin Architecture (app.ts)', () => {
       expect(body.title).toBe('Ungültiges Geschlecht.');
     });
 
+    it('rejects registration with invalid email', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          email: 'not-an-email',
+          password: 'aVerySecurePassword123!',
+          birthDate: '1990-01-01',
+          sex: 'm',
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.payload);
+      expect(body.title).toBe('Ungültige E-Mail-Adresse.');
+    });
+
+    it('rejects registration with birthDate before 1900', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          email: 'grandpa@example.com',
+          password: 'aVerySecurePassword123!',
+          birthDate: '1899-12-31',
+          sex: 'm',
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.payload);
+      expect(body.title).toBe('Ungültiges Geburtsdatum. Das Mindestalter beträgt 16 Jahre (Geburtsjahr ab 1900).');
+    });
+
+    it('rejects registration with birthDate under 16 years old', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          email: 'kid@example.com',
+          password: 'aVerySecurePassword123!',
+          birthDate: '2020-01-01',
+          sex: 'm',
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.payload);
+      expect(body.title).toBe('Ungültiges Geburtsdatum. Das Mindestalter beträgt 16 Jahre (Geburtsjahr ab 1900).');
+    });
+
     it('rejects login when credentials are missing', async () => {
       const res = await app.inject({
         method: 'POST',

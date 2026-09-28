@@ -8,7 +8,7 @@ import { fetchWithingsSamples } from '../../adapters/withings.js';
 import { fetchGoogleFitSamples } from '../../adapters/googleFit.js';
 import { fetchOuraSamples } from '../../adapters/oura.js';
 import { fetchStravaSamples } from '../../adapters/strava.js';
-import { requireUser, upsertGoogleFitSamples } from '../helpers.js';
+import { requireUser, upsertGoogleFitSamples, invalidateTodaySnapshot } from '../helpers.js';
 import '../../types.js';
 
 export async function sourcesSyncRoutes(app: FastifyInstance) {
@@ -50,6 +50,7 @@ export async function sourcesSyncRoutes(app: FastifyInstance) {
       }
 
       await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
+      await invalidateTodaySnapshot(user.id);
 
       return { inserted, sourceId: src.id };
     } catch (err: unknown) {
@@ -101,6 +102,7 @@ export async function sourcesSyncRoutes(app: FastifyInstance) {
       const inserted = await upsertGoogleFitSamples(user.id, src.id, parsedSamples);
 
       await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
+      await invalidateTodaySnapshot(user.id);
 
       return { inserted, sourceId: src.id };
     } catch (err: unknown) {
@@ -165,6 +167,7 @@ export async function sourcesSyncRoutes(app: FastifyInstance) {
       }
 
       await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
+      await invalidateTodaySnapshot(user.id);
 
       return { inserted, sourceId: src.id };
     } catch (err: unknown) {
@@ -230,6 +233,7 @@ export async function sourcesSyncRoutes(app: FastifyInstance) {
       }
 
       await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
+      await invalidateTodaySnapshot(user.id);
 
       return { inserted, sourceId: src.id };
     } catch (err: unknown) {
