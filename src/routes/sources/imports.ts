@@ -9,6 +9,7 @@ import { parseAppleHealthXml } from '../../adapters/appleHealth.js';
 import { looksLikeZip, extractExportXml, AppleHealthZipError } from '../../adapters/appleHealthZip.js';
 import { parseHealthAutoExport, type HaePayload } from '../../adapters/healthAutoExport.js';
 import { parseFhirBundle } from '../../adapters/fhir.js';
+import type { Sample } from '../../score/types.js';
 import { requireUser, invalidateTodaySnapshot } from '../helpers.js';
 import '../../types.js';
 
@@ -36,7 +37,14 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       xmlStream = Readable.from(buffer);
     }
 
-    const parsedSamples = await parseAppleHealthXml(xmlStream, { birthDate: user.birthDate });
+    let parsedSamples: Sample[];
+    try {
+      parsedSamples = await parseAppleHealthXml(xmlStream, { birthDate: user.birthDate });
+    } catch (err) {
+      return reply.status(400).send({
+        title: (err as Error).message || 'Die XML-Datei konnte nicht verarbeitet werden.',
+      });
+    }
 
     if (parsedSamples.length === 0) {
       return reply.status(400).send({
@@ -323,7 +331,12 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
     const user = await requireUser(req, reply);
     if (!user) return;
 
-    const parsedSamples = parseFhirBundle(req.body);
+    let parsedSamples: Sample[];
+    try {
+      parsedSamples = parseFhirBundle(req.body);
+    } catch (err) {
+      return reply.status(400).send({ title: (err as Error).message || 'Ungültiges FHIR-Dokument.' });
+    }
     if (parsedSamples.length === 0) {
       return reply.status(400).send({ title: 'Keine bekannten LOINC-Metriken im FHIR-Bundle gefunden.' });
     }

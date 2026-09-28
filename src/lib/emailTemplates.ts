@@ -4,10 +4,19 @@ const TEXT_DARK = '#22221f';
 const TEXT_MUTED = '#55544f';
 const BG = '#f4f5f2';
 
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function layout(title: string, bodyHtml: string): string {
   return `<!doctype html>
 <html lang="de">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title></head>
 <body style="margin:0;padding:0;background:${BG};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BG};padding:32px 16px;">
     <tr><td align="center">
@@ -36,21 +45,13 @@ function layout(title: string, bodyHtml: string): string {
 
 function button(url: string, label: string): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:999px;background:linear-gradient(135deg, ${BRAND_GREEN_LIGHT} 0%, ${BRAND_GREEN} 100%);">
-    <a href="${url}" style="display:inline-block;padding:12px 28px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;border-radius:999px;">${label}</a>
+    <a href="${escapeHtml(url)}" style="display:inline-block;padding:12px 28px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;border-radius:999px;">${escapeHtml(label)}</a>
   </td></tr></table>`;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 function fallbackLink(url: string): string {
-  return `<p style="color:${TEXT_MUTED};font-size:12px;word-break:break-all;">Falls der Button nicht funktioniert, kopiere diesen Link in deinen Browser:<br><a href="${url}" style="color:${BRAND_GREEN};">${url}</a></p>`;
+  const safeUrl = escapeHtml(url);
+  return `<p style="color:${TEXT_MUTED};font-size:12px;word-break:break-all;">Falls der Button nicht funktioniert, kopiere diesen Link in deinen Browser:<br><a href="${safeUrl}" style="color:${BRAND_GREEN};">${safeUrl}</a></p>`;
 }
 
 export function verifyEmailTemplate(verifyUrl: string): { subject: string; html: string } {

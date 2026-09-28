@@ -81,6 +81,17 @@ function extractObservations(resource: unknown): FhirObservation[] {
 }
 
 export function parseFhirBundle(json: unknown): Sample[] {
+  if (typeof json === 'string') {
+    if (/<!ENTITY/i.test(json) || /SYSTEM\s+["']/i.test(json) || /PUBLIC\s+["']/i.test(json)) {
+      throw new Error('Ungültiges FHIR-Dokument: Externe DTDs und Entity-Definitionen (XXE) sind aus Sicherheitsgründen nicht erlaubt.');
+    }
+    try {
+      json = JSON.parse(json);
+    } catch {
+      return [];
+    }
+  }
+
   const observations = extractObservations(json);
   const results: Sample[] = [];
 
