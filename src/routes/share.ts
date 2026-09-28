@@ -153,28 +153,28 @@ export async function shareRoutes(app: FastifyInstance) {
     },
   }, async (req) => {
     const { id } = req.params as { id: string };
-    const [token] = await db.select().from(shareTokens).where(eq(shareTokens.id, id)).limit(1);
 
-    if (!token) {
-      if (id === 'demo-token') {
-        const issuedAt = new Date('2026-09-01T12:00:00.000Z').toISOString();
-        const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
-        return {
-          valid: true,
-          band: { low: 70, high: 79 },
-          issuedAt,
-          expiresAt,
-          verifiedOnly: true,
-          trustLevel: 'cloud_verified',
-          verifiedSources: ['apple_health', 'oura', 'withings'],
-          certificateType: 'GKV / PKV Verifizierter Prämiennachweis',
-          sampleCount: 1540,
-          activeDays: 90,
-          issuer: 'LONGEVITY Health Intermediary (Ed25519 zertifiziert)',
-        };
-      }
-      return { valid: false, reason: 'not_found' };
+    if (id === 'demo-token') {
+      const [seededToken] = await db.select().from(shareTokens).where(eq(shareTokens.id, id)).limit(1);
+      const issuedAt = seededToken?.issuedAt ? seededToken.issuedAt.toISOString() : new Date('2026-09-01T12:00:00.000Z').toISOString();
+      const expiresAt = seededToken?.expiresAt ? seededToken.expiresAt.toISOString() : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+      return {
+        valid: true,
+        band: seededToken ? { low: seededToken.bandLow, high: seededToken.bandHigh } : { low: 70, high: 79 },
+        issuedAt,
+        expiresAt,
+        verifiedOnly: seededToken?.metadata?.verifiedOnly ?? true,
+        trustLevel: seededToken?.metadata?.trustLevel ?? 'cloud_verified',
+        verifiedSources: seededToken?.metadata?.verifiedSources ?? ['apple_health', 'oura', 'withings'],
+        certificateType: seededToken?.metadata?.certificateType ?? 'GKV / PKV Verifizierter Prämiennachweis',
+        sampleCount: seededToken?.metadata?.totalSampleCount ?? 1540,
+        activeDays: seededToken?.metadata?.activeDays ?? 90,
+        issuer: 'LONGEVITY Health Intermediary (Ed25519 zertifiziert)',
+      };
     }
+
+    const [token] = await db.select().from(shareTokens).where(eq(shareTokens.id, id)).limit(1);
+    if (!token) return { valid: false, reason: 'not_found' };
 
     const publicKey = getActivePublicKey();
     if (!publicKey || !token.signature || token.signature === token.id) {
