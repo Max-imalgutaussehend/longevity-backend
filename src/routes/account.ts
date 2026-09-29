@@ -338,7 +338,15 @@ export async function accountRoutes(app: FastifyInstance) {
    * Erfordert Session + Passwort. Löscht nichts, sondern versendet einen
    * zeitlich begrenzten Bestätigungslink an die hinterlegte E-Mail-Adresse.
    */
-  app.post('/account/request-delete', async (req, reply) => {
+  app.post('/account/request-delete', {
+    config: {
+      rateLimit: {
+        max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 200 : 5,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
 
@@ -394,11 +402,14 @@ export async function accountRoutes(app: FastifyInstance) {
     // Destroy the current session first so the cookie is cleared if this request carries one
     await req.session.destroy();
 
-    // Purge ALL sessions for this user (covers multi-device logins)
-    await db.delete(sessions).where(eq(sessions.userId, result.userId));
+    await db.transaction(async (tx) => {
+      // Purge ALL sessions for this user (covers multi-device logins)
+      await tx.delete(sessions).where(eq(sessions.userId, result.userId));
 
-    // Deleting the user row triggers cascade deletion of all health data
-    await db.delete(users).where(eq(users.id, result.userId));
+      // Deleting the user row triggers cascade deletion of all health data
+      await tx.delete(users).where(eq(users.id, result.userId));
+    });
+
     return reply.status(200).send({ ok: true });
   });
 }

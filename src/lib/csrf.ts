@@ -60,6 +60,9 @@ export function isCsrfExempt(url: string, method: string): boolean {
   // Public Contact & Info
   if (p === '/contact/insurer') return true;
 
+  // Public account-deletion confirmation (token-authenticated, no session required)
+  if (p === '/account/confirm-delete') return true;
+
   // Public Verify
   if (p.startsWith('/verify')) return true;
 
