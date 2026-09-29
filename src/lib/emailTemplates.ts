@@ -112,6 +112,20 @@ export function insurerInviteTemplate(orgName: string, inviteUrl: string): { sub
   };
 }
 
+export function deleteAccountTemplate(confirmUrl: string): { subject: string; html: string; text: string } {
+  return {
+    subject: 'Bestätige die Löschung deines LONGEVITY-Kontos',
+    text: `Du hast die Löschung deines LONGEVITY-Kontos angefordert.\n\nBitte bestätige die endgültige Löschung über den folgenden Link:\n${confirmUrl}\n\nDer Link ist 30 Minuten gültig. Dein Konto und alle gespeicherten Gesundheitsdaten werden unwiderruflich gelöscht. Falls du das nicht warst, kannst du diese E-Mail ignorieren — es passiert nichts, solange du nicht auf den Link klickst.\n\n---\nLONGEVITY · Wissenschaftlich fundiertes Vitalitäts-Tracking`,
+    html: layout('Konto löschen bestätigen', `
+      <p style="margin:0 0 16px;">Du hast die Löschung deines LONGEVITY-Kontos angefordert.</p>
+      <p style="margin:0 0 24px;color:${TEXT_MUTED};">Bitte bestätige die endgültige Löschung über den folgenden Button.</p>
+      <div style="margin:0 0 24px;">${button(confirmUrl, 'Konto endgültig löschen')}</div>
+      <p style="margin:0 0 16px;color:${TEXT_MUTED};">Der Link ist 30 Minuten gültig. Dein Konto und alle gespeicherten Gesundheitsdaten werden unwiderruflich gelöscht. Falls du das nicht warst, kannst du diese E-Mail ignorieren — es passiert nichts, solange du nicht auf den Link klickst.</p>
+      ${fallbackLink(confirmUrl)}
+    `),
+  };
+}
+
 export interface WeeklyReportEmailData {
   displayName?: string | null;
   score: number;

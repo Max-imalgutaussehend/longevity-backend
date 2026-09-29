@@ -421,10 +421,17 @@ paths['/report/send'] = {
   post: { operationId: 'sendWeeklyReport', tags: ['Report'], summary: 'Email weekly report', responses: { 200: { description: 'OK' }, ...auth401 } },
 };
 
-paths['/account'] = {
-  delete: { operationId: 'deleteAccount', tags: ['Account'], summary: 'Delete account',
+paths['/account/request-delete'] = {
+  post: { operationId: 'requestAccountDeletion', tags: ['Account'], summary: 'DSGVO Art. 17, step 1 — verify password and email a time-limited confirmation link',
     requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['password'], properties: { password: { type: 'string' } } } } } },
-    responses: { 204: { description: 'Deleted' }, 401: { description: 'Wrong password' } } },
+    responses: { 200: { description: 'Confirmation email sent' }, 403: { description: 'Wrong password' }, 429: { description: 'Rate limited' }, ...auth401 } },
+};
+
+paths['/account/confirm-delete'] = {
+  post: { operationId: 'confirmAccountDeletion', tags: ['Account'], summary: 'DSGVO Art. 17, step 2 — consume the confirmation token and delete the account (public, token-authenticated)',
+    security: publicSecurity,
+    requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['token'], properties: { token: { type: 'string' } } } } } },
+    responses: { 200: { description: 'Account deleted' }, 400: { description: 'Invalid, expired, or already-used token' } } },
 };
 
 paths['/account/export'] = {

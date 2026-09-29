@@ -17,6 +17,10 @@ import { CURRENT_HEALTH_DATA_CONSENT_VERSION, HEALTH_DATA_CONSENT_TEXT } from '.
 import { validateKvnr, hashKvnr } from '../lib/kvnr.js';
 import { requireUser, requireRole } from './helpers.js';
 import { setCsrfCookies } from '../lib/csrf.js';
+import { env } from '../env.js';
+import { issueEmailToken, consumeEmailToken } from '../lib/emailTokens.js';
+import { sendMail } from '../lib/mail.js';
+import { deleteAccountTemplate } from '../lib/emailTemplates.js';
 import '../types.js';
 
 export async function accountRoutes(app: FastifyInstance) {
@@ -329,18 +333,20 @@ export async function accountRoutes(app: FastifyInstance) {
   });
 
   /**
-   * DELETE /account — DSGVO Art. 17 Recht auf Löschung
+   * POST /account/request-delete — DSGVO Art. 17 Recht auf Löschung, Schritt 1
    *
-   * Cascade via DB FK (onDelete: 'cascade'):
-   *   emailTokens, sources, samples, scoreSnapshots, shareTokens,
-   *   healthDataConsents, insurerRequests
-   *
-   * Explicitly handled here:
-   *   sessions (no FK cascade — purge all active sessions for this user)
-   *
-   * Requires password confirmation to prevent accidental / CSRF-triggered deletion.
+   * Erfordert Session + Passwort. Löscht nichts, sondern versendet einen
+   * zeitlich begrenzten Bestätigungslink an die hinterlegte E-Mail-Adresse.
    */
-  app.delete('/account', async (req, reply) => {
+  app.post('/account/request-delete', {
+    config: {
+      rateLimit: {
+        max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 200 : 5,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
 
@@ -352,14 +358,58 @@ export async function accountRoutes(app: FastifyInstance) {
     const ok = await verifyPassword(user.passwordHash, body.password);
     if (!ok) return reply.status(403).send({ title: 'Das eingegebene Passwort ist nicht korrekt.' });
 
-    // Destroy the current session first so the cookie is cleared
+    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
+    const token = await issueEmailToken(user.id, 'delete_account', 30 * 60 * 1000);
+    const confirmUrl = `${baseUrl}/confirm-delete-account/${token}`;
+    try {
+      await sendMail({ to: user.email, ...deleteAccountTemplate(confirmUrl) });
+    } catch (err) {
+      req.log.error(err, 'Lösch-Bestätigungs-E-Mail konnte nicht gesendet werden');
+      return reply.status(503).send({ title: 'E-Mail konnte nicht gesendet werden. Bitte versuche es später erneut.' });
+    }
+
+    return reply.status(200).send({ ok: true });
+  });
+
+  /**
+   * POST /account/confirm-delete — DSGVO Art. 17 Recht auf Löschung, Schritt 2
+   *
+   * Öffentlicher Endpunkt (kein Session-Zwang, da der Bestätigungslink aus
+   * der E-Mail auch auf einem anderen Gerät geöffnet werden kann). Das
+   * Lösch-Token selbst ist die Autorisierung.
+   *
+   * Cascade via DB FK (onDelete: 'cascade'):
+   *   emailTokens, sources, samples, scoreSnapshots, shareTokens,
+   *   healthDataConsents, insurerRequests
+   *
+   * Explicitly handled here:
+   *   sessions (no FK cascade — purge all active sessions for this user)
+   */
+  app.post('/account/confirm-delete', async (req, reply) => {
+    const { token } = req.body as { token?: string };
+    if (!token) return reply.status(400).send({ title: 'Token fehlt.' });
+
+    const result = await consumeEmailToken(token, 'delete_account');
+    if (!result.ok) {
+      const reasonTitle = result.reason === 'expired'
+        ? 'Der Lösch-Bestätigungslink ist abgelaufen.'
+        : result.reason === 'used'
+        ? 'Der Lösch-Bestätigungslink wurde bereits verwendet.'
+        : 'Ungültiger Lösch-Bestätigungslink.';
+      return reply.status(400).send({ title: reasonTitle });
+    }
+
+    // Destroy the current session first so the cookie is cleared if this request carries one
     await req.session.destroy();
 
-    // Purge ALL sessions for this user (covers multi-device logins)
-    await db.delete(sessions).where(eq(sessions.userId, user.id));
+    await db.transaction(async (tx) => {
+      // Purge ALL sessions for this user (covers multi-device logins)
+      await tx.delete(sessions).where(eq(sessions.userId, result.userId));
 
-    // Deleting the user row triggers cascade deletion of all health data
-    await db.delete(users).where(eq(users.id, user.id));
-    return reply.status(204).send();
+      // Deleting the user row triggers cascade deletion of all health data
+      await tx.delete(users).where(eq(users.id, result.userId));
+    });
+
+    return reply.status(200).send({ ok: true });
   });
 }

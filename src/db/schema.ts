@@ -41,7 +41,7 @@ export const emailTokens = pgTable('email_tokens', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ userIdx: index().on(t.userId) }));
 
-export type EmailTokenPurpose = 'verify_email' | 'reset_password' | 'insurer_invite';
+export type EmailTokenPurpose = 'verify_email' | 'reset_password' | 'insurer_invite' | 'delete_account';
 
 export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),
@@ -155,13 +155,13 @@ export const benefitClaims = pgTable('benefit_claims', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   offerId: uuid('offer_id').notNull().references(() => partnerOffers.id, { onDelete: 'cascade' }),
   organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
-  shareTokenId: text('share_token_id').notNull().references(() => shareTokens.id, { onDelete: 'restrict' }),
+  shareTokenId: text('share_token_id').notNull().references(() => shareTokens.id, { onDelete: 'cascade' }),
   bandLow: integer('band_low').notNull(),
   bandHigh: integer('band_high').notNull(),
   status: text('status').notNull().$type<BenefitClaimStatus>().default('submitted'),
   submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
-  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedBy: uuid('decided_by').references(() => users.id, { onDelete: 'set null' }),
 }, (t) => ({
   userIdx: index().on(t.userId),
   orgIdx: index().on(t.organizationId),

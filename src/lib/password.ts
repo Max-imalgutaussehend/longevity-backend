@@ -28,12 +28,14 @@ export const passwordSchema = z.string()
   .regex(/[A-Z]/, 'Passwort muss mindestens einen Großbuchstaben enthalten.')
   .regex(/[\d\W_]/, 'Passwort muss mindestens eine Zahl oder ein Sonderzeichen enthalten.');
 
+const DEFAULT_PEPPER = 'longevity-default-pepper-secret-32b-long!';
+
 /**
  * Kombiniert das Passwort vor dem Hashing per HMAC-SHA256 mit dem Server-Pepper.
  * Das Resultat ist ein hex-kodierter String, der UTF-8-kompatibel für Argon2 ist.
  */
 export function pepperPassword(password: string): string {
-  const pepper = process.env.PASSWORD_PEPPER || 'longevity-default-pepper-secret-32b-long!';
+  const pepper = process.env.PASSWORD_PEPPER || DEFAULT_PEPPER;
   return createHmac('sha256', pepper).update(password).digest('hex');
 }
 
@@ -45,15 +47,39 @@ export async function hashPassword(password: string): Promise<string> {
   return hash(peppered, ARGON2_OPTIONS);
 }
 
+export interface PasswordVerificationResult {
+  ok: boolean;
+  /** True when the hash was verified via a legacy fallback and should be transparently rehashed with the current pepper. */
+  needsRehash: boolean;
+}
+
 /**
  * Verifies a plaintext password against an Argon2id hash.
- * Supports transparent fallback to unpeppered verification for existing/legacy hashes.
+ * Supports transparent fallback to unpeppered verification for existing/legacy hashes,
+ * and to the hardcoded default pepper for accounts hashed before an individual
+ * PASSWORD_PEPPER was deployed to the environment. Reports whether the hash was
+ * produced by a legacy path so callers can opportunistically rehash it.
  */
-export async function verifyPassword(hashStr: string, password: string): Promise<boolean> {
+export async function verifyPasswordWithRehash(hashStr: string, password: string): Promise<PasswordVerificationResult> {
   const peppered = pepperPassword(password);
   const ok = await verify(hashStr, peppered).catch(() => false);
-  if (ok) return true;
+  if (ok) return { ok: true, needsRehash: false };
+
+  // Fallback für Hashes, die mit dem Default-Pepper erzeugt wurden, bevor ein
+  // individueller PASSWORD_PEPPER in der Umgebung gesetzt wurde.
+  const defaultPeppered = createHmac('sha256', DEFAULT_PEPPER).update(password).digest('hex');
+  const okDefault = await verify(hashStr, defaultPeppered).catch(() => false);
+  if (okDefault) return { ok: true, needsRehash: true };
 
   // Fallback für unpepperte Legacy-Hashes
-  return verify(hashStr, password).catch(() => false);
+  const okUnpeppered = await verify(hashStr, password).catch(() => false);
+  return { ok: okUnpeppered, needsRehash: okUnpeppered };
+}
+
+/**
+ * Verifies a plaintext password against an Argon2id hash. See verifyPasswordWithRehash
+ * for callers that want to opportunistically rehash legacy hashes.
+ */
+export async function verifyPassword(hashStr: string, password: string): Promise<boolean> {
+  return (await verifyPasswordWithRehash(hashStr, password)).ok;
 }
