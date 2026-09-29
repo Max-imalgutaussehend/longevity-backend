@@ -6,7 +6,7 @@ import { env } from '../env.js';
 import { db } from '../db/client.js';
 import { users, organizations } from '../db/schema.js';
 import { isWeakPassword } from '../lib/weakPasswords.js';
-import { hashPassword, verifyPassword, verifyPasswordWithRehash, passwordSchema } from '../lib/password.js';
+import { hashPassword, verifyPasswordWithRehash, passwordSchema } from '../lib/password.js';
 import { issueEmailToken, consumeEmailToken } from '../lib/emailTokens.js';
 import { sendMail } from '../lib/mail.js';
 import { verifyEmailTemplate, passwordResetTemplate } from '../lib/emailTemplates.js';
