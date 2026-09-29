@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { createHmac } from 'node:crypto';
 import { hash, Algorithm } from '@node-rs/argon2';
 import { hashPassword, verifyPassword, passwordSchema, ARGON2_OPTIONS, pepperPassword } from '../password.js';
 
@@ -49,6 +50,22 @@ describe('Password Module — Argon2id Härtung & Server-Pepper', () => {
 
       const wrong = await verifyPassword(legacyHash, 'wrong-password');
       expect(wrong).toBe(false);
+    });
+
+    it('supports fallback verification for hashes created with the default pepper before PASSWORD_PEPPER was set in prod (#90)', async () => {
+      const rawPassword = 'pre-pepper-deploy-password-123!';
+      const defaultPepperedHex = createHmac('sha256', 'longevity-default-pepper-secret-32b-long!').update(rawPassword).digest('hex');
+      const hashFromDefaultPepper = await hash(defaultPepperedHex, ARGON2_OPTIONS);
+
+      const original = process.env.PASSWORD_PEPPER;
+      process.env.PASSWORD_PEPPER = 'a-distinct-individual-production-pepper-32b!';
+      try {
+        expect(await verifyPassword(hashFromDefaultPepper, rawPassword)).toBe(true);
+        expect(await verifyPassword(hashFromDefaultPepper, 'wrong-password')).toBe(false);
+      } finally {
+        if (original === undefined) delete process.env.PASSWORD_PEPPER;
+        else process.env.PASSWORD_PEPPER = original;
+      }
     });
   });
 
