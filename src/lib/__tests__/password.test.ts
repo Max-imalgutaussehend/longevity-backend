@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { hash, Algorithm } from '@node-rs/argon2';
-import { hashPassword, verifyPassword, passwordSchema, ARGON2_OPTIONS, pepperPassword } from '../password.js';
+import { hashPassword, verifyPassword, verifyPasswordWithRehash, passwordSchema, ARGON2_OPTIONS, pepperPassword } from '../password.js';
 
 describe('Password Module — Argon2id Härtung & Server-Pepper', () => {
   describe('hashPassword & verifyPassword', () => {
@@ -66,6 +66,44 @@ describe('Password Module — Argon2id Härtung & Server-Pepper', () => {
         if (original === undefined) delete process.env.PASSWORD_PEPPER;
         else process.env.PASSWORD_PEPPER = original;
       }
+    });
+  });
+
+  describe('verifyPasswordWithRehash() — opportunistic rehash signal (#90 follow-up)', () => {
+    it('reports needsRehash: false for a hash verified with the current pepper', async () => {
+      const password = 'CurrentPepperPassword123!';
+      const currentHash = await hashPassword(password);
+      const result = await verifyPasswordWithRehash(currentHash, password);
+      expect(result).toEqual({ ok: true, needsRehash: false });
+    });
+
+    it('reports needsRehash: true for a hash verified via the legacy default-pepper fallback', async () => {
+      const rawPassword = 'pre-pepper-rehash-test-123!';
+      const defaultPepperedHex = createHmac('sha256', 'longevity-default-pepper-secret-32b-long!').update(rawPassword).digest('hex');
+      const hashFromDefaultPepper = await hash(defaultPepperedHex, ARGON2_OPTIONS);
+
+      const original = process.env.PASSWORD_PEPPER;
+      process.env.PASSWORD_PEPPER = 'a-distinct-individual-production-pepper-32b!';
+      try {
+        const result = await verifyPasswordWithRehash(hashFromDefaultPepper, rawPassword);
+        expect(result).toEqual({ ok: true, needsRehash: true });
+      } finally {
+        if (original === undefined) delete process.env.PASSWORD_PEPPER;
+        else process.env.PASSWORD_PEPPER = original;
+      }
+    });
+
+    it('reports needsRehash: true for an unpeppered legacy hash', async () => {
+      const rawPassword = 'legacy-unpeppered-rehash-test';
+      const legacyHash = await hash(rawPassword);
+      const result = await verifyPasswordWithRehash(legacyHash, rawPassword);
+      expect(result).toEqual({ ok: true, needsRehash: true });
+    });
+
+    it('reports ok: false and needsRehash: false for a wrong password', async () => {
+      const currentHash = await hashPassword('CorrectPassword123!');
+      const result = await verifyPasswordWithRehash(currentHash, 'WrongPassword123!');
+      expect(result).toEqual({ ok: false, needsRehash: false });
     });
   });
 

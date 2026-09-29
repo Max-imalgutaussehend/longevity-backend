@@ -1,9 +1,13 @@
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://longevity:longevity_dev@localhost:5432/longevity';
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-32-bytes-long!';
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
+
+// Deletion-confirmation emails don't depend on a real SMTP transport being
+// reachable in every test environment — mock it so this suite is self-contained.
+vi.mock('../lib/mail.js', () => ({ sendMail: vi.fn().mockResolvedValue(undefined) }));
 
 describe('2-step account deletion via email confirmation (#92)', () => {
   let app: FastifyInstance;
@@ -170,6 +174,25 @@ describe('2-step account deletion via email confirmation (#92)', () => {
       const [stillThere] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
       expect(stillThere).toBeDefined();
       await db.delete(users).where(eq(users.id, user.id));
+    });
+
+    it('is exempt from CSRF enforcement (the confirmation token is the authorization, no cookie session exists)', async () => {
+      const user = await createUser(`csrf-exempt-delete-${Date.now()}@example.com`);
+      const token = await issueEmailToken(user.id, 'delete_account', 30 * 60 * 1000);
+
+      // x-enforce-csrf forces the CSRF check even under NODE_ENV=test, mirroring
+      // production behavior. No cookie or x-csrf-token header is sent — this must
+      // not 403 (Victor's PR-review finding: the route was missing from isCsrfExempt).
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/account/confirm-delete',
+        headers: { 'x-enforce-csrf': 'true' },
+        payload: { token },
+      });
+      expect(res.statusCode).toBe(200);
+
+      const [gone] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+      expect(gone).toBeUndefined();
     });
   });
 });

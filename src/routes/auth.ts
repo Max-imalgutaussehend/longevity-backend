@@ -6,7 +6,7 @@ import { env } from '../env.js';
 import { db } from '../db/client.js';
 import { users, organizations } from '../db/schema.js';
 import { isWeakPassword } from '../lib/weakPasswords.js';
-import { hashPassword, verifyPassword, passwordSchema } from '../lib/password.js';
+import { hashPassword, verifyPassword, verifyPasswordWithRehash, passwordSchema } from '../lib/password.js';
 import { issueEmailToken, consumeEmailToken } from '../lib/emailTokens.js';
 import { sendMail } from '../lib/mail.js';
 import { verifyEmailTemplate, passwordResetTemplate } from '../lib/emailTemplates.js';
@@ -100,7 +100,15 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.status(201).send({ id: user.id, email: user.email, mailSent });
   });
 
-  app.post('/verify-email', async (req, reply) => {
+  app.post('/verify-email', {
+    config: {
+      rateLimit: {
+        max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 200 : 10,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({ statusCode: 429, title: 'Zu viele Anfragen. Bitte in 15 Minuten erneut versuchen.' }),
+      },
+    },
+  }, async (req, reply) => {
     const { token } = req.body as { token?: string };
     if (!token) return reply.status(400).send({ title: 'Token fehlt.' });
 
@@ -243,8 +251,13 @@ export async function authRoutes(app: FastifyInstance) {
     const [user] = await db.select().from(users).where(eq(users.email, cleanEmail)).limit(1);
     if (!user) return reply.status(401).send({ title: 'E-Mail oder Passwort falsch.' });
 
-    const ok = await verifyPassword(user.passwordHash, password);
+    const { ok, needsRehash } = await verifyPasswordWithRehash(user.passwordHash, password);
     if (!ok) return reply.status(401).send({ title: 'E-Mail oder Passwort falsch.' });
+
+    if (needsRehash) {
+      const freshHash = await hashPassword(password);
+      await db.update(users).set({ passwordHash: freshHash }).where(eq(users.id, user.id));
+    }
 
     req.session.userId = user.id;
     setCsrfCookies(reply);
