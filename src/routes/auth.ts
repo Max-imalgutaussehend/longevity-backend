@@ -115,7 +115,10 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     await db.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.id, result.userId));
-    return reply.status(200).send({ ok: true });
+
+    req.session.userId = result.userId;
+    setCsrfCookies(reply);
+    return reply.status(200).send({ ok: true, userId: result.userId });
   });
 
   app.post('/resend-verification', async (req, reply) => {
