@@ -7,7 +7,7 @@
     "pnpm": ">=9"
   },
   "scripts": {
-    "dev": "tsx watch --env-file=.env src/index.ts",
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
@@ -15,15 +15,15 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "seed:demo": "tsx src/seed/demo.ts",
-    "seed:full": "tsx src/seed/fullDemo.ts",
-    "seed:offers": "tsx src/seed/offers.ts",
-    "seed:admin": "tsx src/seed/adminUser.ts",
-    "seed:demo-insurer": "tsx src/seed/demoInsurer.ts",
-    "invite:insurer": "tsx src/seed/inviteInsurer.ts",
-    "gen:openapi": "tsx src/scripts/genOpenApi.ts"
+    "seed:demo": "tsx --env-file-if-exists=.env src/seed/demo.ts",
+    "seed:full": "tsx --env-file-if-exists=.env src/seed/fullDemo.ts",
+    "seed:offers": "tsx --env-file-if-exists=.env src/seed/offers.ts",
+    "seed:admin": "tsx --env-file-if-exists=.env src/seed/adminUser.ts",
+    "seed:demo-insurer": "tsx --env-file-if-exists=.env src/seed/demoInsurer.ts",
+    "invite:insurer": "tsx --env-file-if-exists=.env src/seed/inviteInsurer.ts",
+    "gen:openapi": "tsx --env-file-if-exists=.env src/scripts/genOpenApi.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^9.4.0",
