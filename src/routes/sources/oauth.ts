@@ -5,6 +5,7 @@ import { sources } from '../../db/schema.js';
 import { env } from '../../env.js';
 import { exchangeCodeForToken } from '../../lib/oauthTokens.js';
 import { oauthProviders, providerToSourceKind } from '../../lib/oauthProviders.js';
+import { signOAuthState, verifyOAuthState } from '../../lib/oauthState.js';
 import { fetchGoogleFitSamples } from '../../adapters/googleFit.js';
 import { requireUser, upsertGoogleFitSamples, invalidateTodaySnapshot } from '../helpers.js';
 import '../../types.js';
@@ -26,7 +27,7 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
 
     const body = (req.body as { redirectUri?: string } | undefined) ?? {};
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
-    const state = Buffer.from(JSON.stringify({ userId: user.id, provider })).toString('base64url');
+    const state = signOAuthState({ userId: user.id, provider });
     const redirectUri = (body.redirectUri && body.redirectUri.trim()) || oauthProvider.redirectUri(baseUrl);
 
     const url = new URL(oauthProvider.authorizeUrl);
@@ -67,12 +68,11 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
     const sourceKind = providerToSourceKind(provider);
     if (!sourceKind) return reply.status(404).send({ title: 'Unbekannter Provider.' });
 
-    let userId: string;
-    try {
-      ({ userId } = JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as { userId: string });
-    } catch {
-      return reply.status(400).send({ title: 'Ungültiger state-Parameter.' });
+    const stateResult = verifyOAuthState(state, provider);
+    if (!stateResult.ok) {
+      return reply.status(400).send({ title: 'Ungültiger oder abgelaufener state-Parameter.' });
     }
+    const { userId } = stateResult;
 
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const credentials = await exchangeCodeForToken(oauthProvider, code, baseUrl);
@@ -142,12 +142,11 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
     }
     if (!code || !state) return reply.status(400).send({ title: 'code oder state fehlt.' });
 
-    let userId: string;
-    try {
-      ({ userId } = JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as { userId: string });
-    } catch {
-      return reply.status(400).send({ title: 'Ungültiger state-Parameter.' });
+    const stateResult = verifyOAuthState(state, 'google-fit');
+    if (!stateResult.ok) {
+      return reply.status(400).send({ title: 'Ungültiger oder abgelaufener state-Parameter.' });
     }
+    const { userId } = stateResult;
 
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const redirectUri = (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/sources/google/callback`;

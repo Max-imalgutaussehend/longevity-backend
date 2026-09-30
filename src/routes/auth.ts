@@ -275,20 +275,25 @@ export async function authRoutes(app: FastifyInstance) {
     if (!googleClientId) return { url: null };
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const redirectUri = (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/auth/google/callback`;
+    const state = crypto.randomBytes(32).toString('base64url');
+    req.session.googleOAuthState = state;
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', googleClientId);
     url.searchParams.set('redirect_uri', redirectUri);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('scope', 'openid email profile');
     url.searchParams.set('prompt', 'select_account');
+    url.searchParams.set('state', state);
     return { url: url.toString() };
   });
 
   app.get('/google/callback', async (req, reply) => {
-    const { code } = req.query as { code?: string };
+    const { code, state } = req.query as { code?: string; state?: string };
     const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
     const googleClientSecret = env.GOOGLE_FIT_CLIENT_SECRET ?? env.GOOGLE_HEALTH_CLIENT_SECRET;
-    if (!googleClientId || !googleClientSecret || !code) {
+    const expectedState = req.session.googleOAuthState;
+    delete req.session.googleOAuthState;
+    if (!googleClientId || !googleClientSecret || !code || !state || !expectedState || state !== expectedState) {
       return reply.redirect('/login?error=google_auth_failed');
     }
 
