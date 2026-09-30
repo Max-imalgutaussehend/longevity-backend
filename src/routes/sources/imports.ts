@@ -11,6 +11,7 @@ import { parseHealthAutoExport, type HaePayload } from '../../adapters/healthAut
 import { parseFhirBundle } from '../../adapters/fhir.js';
 import type { Sample } from '../../score/types.js';
 import { requireUser, invalidateTodaySnapshot } from '../helpers.js';
+import { insertSamplesBatched, upsertSamplesBatched } from '../../lib/sampleImport.js';
 import '../../types.js';
 
 const QUESTIONNAIRE_METRICS = new Set(['smoking', 'alcohol_units']);
@@ -77,18 +78,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, src.id));
     }
 
-    let inserted = 0;
-    for (const s of parsedSamples) {
-      await db.insert(samples).values({
-        userId: user.id,
-        sourceId: src.id,
-        metric: s.metric,
-        value: s.value,
-        unit: s.unit,
-        measuredAt: new Date(s.measuredAt),
-      }).onConflictDoNothing();
-      inserted++;
-    }
+    const inserted = await insertSamplesBatched(user.id, src.id, parsedSamples);
 
     await invalidateTodaySnapshot(user.id);
     return { inserted, sourceId: src.id };
@@ -114,18 +104,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       await db.update(sources).set({ adapter: 'health_auto_export', lastSyncAt: new Date(), enabled: true }).where(eq(sources.id, src.id));
     }
 
-    let inserted = 0;
-    for (const s of parsedSamples) {
-      const rows = await db.insert(samples).values({
-        userId: user.id,
-        sourceId: src.id,
-        metric: s.metric,
-        value: s.value,
-        unit: s.unit,
-        measuredAt: new Date(s.measuredAt),
-      }).onConflictDoNothing().returning({ id: samples.id });
-      if (rows.length > 0) inserted++;
-    }
+    const inserted = await insertSamplesBatched(user.id, src.id, parsedSamples);
 
     await invalidateTodaySnapshot(user.id);
     return { inserted, sourceId: src.id };
@@ -362,21 +341,7 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
       await db.update(sources).set({ lastSyncAt: new Date() }).where(eq(sources.id, labSource.id));
     }
 
-    let inserted = 0;
-    for (const s of parsedSamples) {
-      const rows = await db.insert(samples).values({
-        userId: user.id,
-        sourceId: labSource.id,
-        metric: s.metric,
-        value: s.value,
-        unit: s.unit,
-        measuredAt: new Date(s.measuredAt),
-      }).onConflictDoUpdate({
-        target: [samples.userId, samples.metric, samples.measuredAt],
-        set: { value: s.value, unit: s.unit },
-      }).returning({ id: samples.id });
-      if (rows.length > 0) inserted++;
-    }
+    const inserted = await upsertSamplesBatched(user.id, labSource.id, parsedSamples);
 
     await invalidateTodaySnapshot(user.id);
     return reply.status(201).send({ inserted, sourceId: labSource.id });
