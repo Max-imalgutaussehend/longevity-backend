@@ -68,11 +68,18 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
     const sourceKind = providerToSourceKind(provider);
     if (!sourceKind) return reply.status(404).send({ title: 'Unbekannter Provider.' });
 
-    const stateResult = verifyOAuthState(state, provider);
+    // google-health shares google-fit's OAuth redirect endpoint (see oauthProviders.ts),
+    // so a state signed for 'google-health' arrives here with :provider === 'google-fit'.
+    const acceptedStateProviders = provider === 'google-fit' ? ['google-fit', 'google-health'] : [provider];
+    const stateResult = verifyOAuthState(state, acceptedStateProviders);
     if (!stateResult.ok) {
       return reply.status(400).send({ title: 'Ungültiger oder abgelaufener state-Parameter.' });
     }
     const { userId } = stateResult;
+
+    if (req.session.userId && req.session.userId !== userId) {
+      return reply.status(403).send({ title: 'State gehört nicht zur aktuellen Sitzung.' });
+    }
 
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const credentials = await exchangeCodeForToken(oauthProvider, code, baseUrl);
@@ -142,11 +149,15 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
     }
     if (!code || !state) return reply.status(400).send({ title: 'code oder state fehlt.' });
 
-    const stateResult = verifyOAuthState(state, 'google-fit');
+    const stateResult = verifyOAuthState(state, ['google-fit', 'google-health']);
     if (!stateResult.ok) {
       return reply.status(400).send({ title: 'Ungültiger oder abgelaufener state-Parameter.' });
     }
     const { userId } = stateResult;
+
+    if (req.session.userId && req.session.userId !== userId) {
+      return reply.status(403).send({ title: 'State gehört nicht zur aktuellen Sitzung.' });
+    }
 
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const redirectUri = (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/sources/google/callback`;

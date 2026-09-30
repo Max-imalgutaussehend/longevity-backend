@@ -12,6 +12,7 @@ import { sendMail } from '../lib/mail.js';
 import { verifyEmailTemplate, passwordResetTemplate } from '../lib/emailTemplates.js';
 import { requireUser } from './helpers.js';
 import { setCsrfCookies, clearCsrfCookies } from '../lib/csrf.js';
+import { signAntiCsrfState, verifyAntiCsrfState } from '../lib/oauthState.js';
 import '../types.js';
 
 export const registerSchema = z.object({
@@ -275,8 +276,7 @@ export async function authRoutes(app: FastifyInstance) {
     if (!googleClientId) return { url: null };
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const redirectUri = (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/auth/google/callback`;
-    const state = crypto.randomBytes(32).toString('base64url');
-    req.session.googleOAuthState = state;
+    const state = signAntiCsrfState();
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', googleClientId);
     url.searchParams.set('redirect_uri', redirectUri);
@@ -291,9 +291,7 @@ export async function authRoutes(app: FastifyInstance) {
     const { code, state } = req.query as { code?: string; state?: string };
     const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
     const googleClientSecret = env.GOOGLE_FIT_CLIENT_SECRET ?? env.GOOGLE_HEALTH_CLIENT_SECRET;
-    const expectedState = req.session.googleOAuthState;
-    delete req.session.googleOAuthState;
-    if (!googleClientId || !googleClientSecret || !code || !state || !expectedState || state !== expectedState) {
+    if (!googleClientId || !googleClientSecret || !code || !state || !verifyAntiCsrfState(state)) {
       return reply.redirect('/login?error=google_auth_failed');
     }
 
