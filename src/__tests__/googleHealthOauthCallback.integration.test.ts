@@ -26,6 +26,7 @@ describe('google-health OAuth connect/callback flow (#129 follow-up)', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let sources: any;
   let testUserId: string | undefined;
+  let sessionCookie: string;
 
   beforeAll(async () => {
     const { buildApp } = await import('../app.js');
@@ -37,14 +38,24 @@ describe('google-health OAuth connect/callback flow (#129 follow-up)', () => {
     app = await buildApp();
     await app.ready();
 
-    const [user] = await db.insert(users).values({
-      email: `google-health-oauth-test-${Date.now()}@example.com`,
-      passwordHash: 'not-a-real-hash',
-      birthDate: '1990-01-01',
-      sex: 'm',
-      emailVerifiedAt: new Date(),
-    }).returning();
-    testUserId = user.id;
+    // A wearable connect always originates from an authenticated session —
+    // the callback now enforces that (#129 follow-up review), so tests must
+    // present a real session cookie for testUserId, not just a bare state.
+    const regRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: `google-health-oauth-test-${Date.now()}@example.com`,
+        password: 'ValidPassword123!',
+        birthDate: '1990-01-01',
+        sex: 'm',
+      },
+    });
+    expect(regRes.statusCode).toBe(201);
+    testUserId = JSON.parse(regRes.body).id as string;
+    const setCookie = regRes.headers['set-cookie'];
+    const cookieArray = Array.isArray(setCookie) ? setCookie : [setCookie as string];
+    sessionCookie = cookieArray.map((c) => c.split(';')[0]).join('; ');
   });
 
   afterAll(async () => {
@@ -89,7 +100,7 @@ describe('google-health OAuth connect/callback flow (#129 follow-up)', () => {
       const res = await app.inject({
         method: 'GET',
         url: `/api/oauth/callback/google-fit?code=mock-auth-code&state=${encodeURIComponent(state)}`,
-        headers: { accept: 'application/json' },
+        headers: { accept: 'application/json', cookie: sessionCookie },
       });
 
       expect(res.statusCode).toBe(200);
@@ -113,9 +124,22 @@ describe('google-health OAuth connect/callback flow (#129 follow-up)', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/oauth/callback/google-fit?code=mock-auth-code&state=${encodeURIComponent(state)}`,
+      headers: { cookie: sessionCookie },
     });
 
     expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects a callback with a valid state but no session cookie at all (#129 review — session must always be required, not just checked when present)', async () => {
+    const { signOAuthState } = await import('../lib/oauthState.js');
+    const state = signOAuthState({ userId: testUserId!, provider: 'google-health' });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/oauth/callback/google-fit?code=mock-auth-code&state=${encodeURIComponent(state)}`,
+    });
+
+    expect(res.statusCode).toBe(403);
   });
 
   it('rejects a callback whose state names a different user than the active session (#107 issue requirement)', async () => {
@@ -134,7 +158,7 @@ describe('google-health OAuth connect/callback flow (#129 follow-up)', () => {
     expect(regRes.statusCode).toBe(201);
     const setCookie = regRes.headers['set-cookie'];
     const cookieArray = Array.isArray(setCookie) ? setCookie : [setCookie as string];
-    const sessionCookie = cookieArray.map((c) => c.split(';')[0]).join('; ');
+    const otherUserSessionCookie = cookieArray.map((c) => c.split(';')[0]).join('; ');
     const sessionUserId = JSON.parse(regRes.body).id as string;
 
     try {
@@ -144,7 +168,7 @@ describe('google-health OAuth connect/callback flow (#129 follow-up)', () => {
       const res = await app.inject({
         method: 'GET',
         url: `/api/oauth/callback/google-fit?code=mock-auth-code&state=${encodeURIComponent(stateForOtherUser)}`,
-        headers: { cookie: sessionCookie },
+        headers: { cookie: otherUserSessionCookie },
       });
 
       expect(res.statusCode).toBe(403);

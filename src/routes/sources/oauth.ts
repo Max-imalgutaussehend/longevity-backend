@@ -77,7 +77,10 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
     }
     const { userId } = stateResult;
 
-    if (req.session.userId && req.session.userId !== userId) {
+    // A wearable connect always originates from an authenticated session
+    // (POST /sources/:provider/connect requires one); the callback must see
+    // that same session, not merely "a session if one happens to be present".
+    if (!req.session.userId || req.session.userId !== userId) {
       return reply.status(403).send({ title: 'State gehört nicht zur aktuellen Sitzung.' });
     }
 
@@ -155,7 +158,10 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
     }
     const { userId } = stateResult;
 
-    if (req.session.userId && req.session.userId !== userId) {
+    // A wearable connect always originates from an authenticated session
+    // (POST /sources/:provider/connect requires one); the callback must see
+    // that same session, not merely "a session if one happens to be present".
+    if (!req.session.userId || req.session.userId !== userId) {
       return reply.status(403).send({ title: 'State gehört nicht zur aktuellen Sitzung.' });
     }
 
