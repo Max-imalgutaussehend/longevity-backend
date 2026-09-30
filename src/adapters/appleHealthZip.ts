@@ -1,5 +1,5 @@
 import yauzl from 'yauzl';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable, Transform } from 'node:stream';
 
 const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]); // "PK\x03\x04"
 
@@ -11,9 +11,28 @@ export function looksLikeZip(buffer: Buffer): boolean {
 // alongside export_cda.xml and workout-routes/*.gpx, which we ignore.
 const EXPORT_XML_RE = /(^|\/)Export\.xml$/i;
 
+// Guards against zip-bomb decompression: a small compressed archive that
+// expands to an unbounded size and exhausts memory/CPU while streaming.
+export const MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024;
+
 export class AppleHealthZipError extends Error {}
 
-export async function extractExportXml(zipBuffer: Buffer): Promise<Readable> {
+function boundedByteCounter(limit: number, onExceeded: () => void): Transform {
+  let total = 0;
+  return new Transform({
+    transform(chunk, _enc, callback) {
+      total += chunk.length;
+      if (total > limit) {
+        onExceeded();
+        callback(new AppleHealthZipError('Das entpackte Archiv überschreitet die zulässige Maximalgröße.'));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+}
+
+export async function extractExportXml(zipBuffer: Buffer, maxUncompressedBytes: number = MAX_UNCOMPRESSED_BYTES): Promise<Readable> {
   return new Promise((resolve, reject) => {
     yauzl.fromBuffer(zipBuffer, { lazyEntries: true }, (err, zipfile) => {
       if (err || !zipfile) {
@@ -36,6 +55,12 @@ export async function extractExportXml(zipBuffer: Buffer): Promise<Readable> {
           return;
         }
 
+        if (entry.uncompressedSize > maxUncompressedBytes) {
+          zipfile.close();
+          reject(new AppleHealthZipError('Das entpackte Archiv überschreitet die zulässige Maximalgröße.'));
+          return;
+        }
+
         found = true;
         zipfile.openReadStream(entry, (streamErr, stream) => {
           if (streamErr || !stream) {
@@ -47,7 +72,17 @@ export async function extractExportXml(zipBuffer: Buffer): Promise<Readable> {
           // once the entry's own read stream is open — release it explicitly
           // rather than relying on readEntry()/'end' to ever fire again.
           stream.on('end', () => zipfile.close());
-          resolve(stream);
+
+          const bounded = boundedByteCounter(maxUncompressedBytes, () => {
+            stream.unpipe();
+            stream.destroy();
+            zipfile.close();
+          });
+          const output = new PassThrough();
+          stream.on('error', () => output.destroy(new AppleHealthZipError('Das entpackte Archiv überschreitet die zulässige Maximalgröße oder ist beschädigt.')));
+          stream.pipe(bounded).pipe(output);
+          bounded.on('error', (boundedErr) => output.destroy(boundedErr));
+          resolve(output);
         });
       });
 
