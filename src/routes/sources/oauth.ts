@@ -5,6 +5,7 @@ import { sources } from '../../db/schema.js';
 import { env } from '../../env.js';
 import { exchangeCodeForToken } from '../../lib/oauthTokens.js';
 import { oauthProviders, providerToSourceKind } from '../../lib/oauthProviders.js';
+import { signOAuthState, verifyOAuthState } from '../../lib/oauthState.js';
 import { fetchGoogleFitSamples } from '../../adapters/googleFit.js';
 import { requireUser, upsertGoogleFitSamples, invalidateTodaySnapshot } from '../helpers.js';
 import '../../types.js';
@@ -26,7 +27,7 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
 
     const body = (req.body as { redirectUri?: string } | undefined) ?? {};
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
-    const state = Buffer.from(JSON.stringify({ userId: user.id, provider })).toString('base64url');
+    const state = signOAuthState({ userId: user.id, provider });
     const redirectUri = (body.redirectUri && body.redirectUri.trim()) || oauthProvider.redirectUri(baseUrl);
 
     const url = new URL(oauthProvider.authorizeUrl);
@@ -67,11 +68,20 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
     const sourceKind = providerToSourceKind(provider);
     if (!sourceKind) return reply.status(404).send({ title: 'Unbekannter Provider.' });
 
-    let userId: string;
-    try {
-      ({ userId } = JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as { userId: string });
-    } catch {
-      return reply.status(400).send({ title: 'Ungültiger state-Parameter.' });
+    // google-health shares google-fit's OAuth redirect endpoint (see oauthProviders.ts),
+    // so a state signed for 'google-health' arrives here with :provider === 'google-fit'.
+    const acceptedStateProviders = provider === 'google-fit' ? ['google-fit', 'google-health'] : [provider];
+    const stateResult = verifyOAuthState(state, acceptedStateProviders);
+    if (!stateResult.ok) {
+      return reply.status(400).send({ title: 'Ungültiger oder abgelaufener state-Parameter.' });
+    }
+    const { userId } = stateResult;
+
+    // A wearable connect always originates from an authenticated session
+    // (POST /sources/:provider/connect requires one); the callback must see
+    // that same session, not merely "a session if one happens to be present".
+    if (!req.session.userId || req.session.userId !== userId) {
+      return reply.status(403).send({ title: 'State gehört nicht zur aktuellen Sitzung.' });
     }
 
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
@@ -142,11 +152,17 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
     }
     if (!code || !state) return reply.status(400).send({ title: 'code oder state fehlt.' });
 
-    let userId: string;
-    try {
-      ({ userId } = JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as { userId: string });
-    } catch {
-      return reply.status(400).send({ title: 'Ungültiger state-Parameter.' });
+    const stateResult = verifyOAuthState(state, ['google-fit', 'google-health']);
+    if (!stateResult.ok) {
+      return reply.status(400).send({ title: 'Ungültiger oder abgelaufener state-Parameter.' });
+    }
+    const { userId } = stateResult;
+
+    // A wearable connect always originates from an authenticated session
+    // (POST /sources/:provider/connect requires one); the callback must see
+    // that same session, not merely "a session if one happens to be present".
+    if (!req.session.userId || req.session.userId !== userId) {
+      return reply.status(403).send({ title: 'State gehört nicht zur aktuellen Sitzung.' });
     }
 
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;

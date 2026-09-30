@@ -12,6 +12,7 @@ import { sendMail } from '../lib/mail.js';
 import { verifyEmailTemplate, passwordResetTemplate } from '../lib/emailTemplates.js';
 import { requireUser } from './helpers.js';
 import { setCsrfCookies, clearCsrfCookies } from '../lib/csrf.js';
+import { signAntiCsrfState, verifyAntiCsrfState } from '../lib/oauthState.js';
 import '../types.js';
 
 export const registerSchema = z.object({
@@ -270,25 +271,49 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.status(204).send();
   });
 
-  app.post('/google/url', async (req) => {
+  app.post('/google/url', async (req, reply) => {
     const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
     if (!googleClientId) return { url: null };
     const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const redirectUri = (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.trim()) || `${baseUrl}/api/auth/google/callback`;
+    const state = signAntiCsrfState();
+    // Bind the state to this browser via an HTTP-only cookie. A bare signed
+    // state (HMAC + expiry, no cookie) authenticates that the SERVER issued
+    // it, but not that THIS caller was the one who received it — an attacker
+    // can start their own flow, grab a valid state/code pair, and hand the
+    // resulting callback URL to a victim (login CSRF, RFC 6749 §10.12). The
+    // cookie is the actual binding to the requesting browser.
+    reply.setCookie('google_oauth_state', state, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: 'auto',
+      maxAge: 600,
+    });
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', googleClientId);
     url.searchParams.set('redirect_uri', redirectUri);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('scope', 'openid email profile');
     url.searchParams.set('prompt', 'select_account');
+    url.searchParams.set('state', state);
     return { url: url.toString() };
   });
 
   app.get('/google/callback', async (req, reply) => {
-    const { code } = req.query as { code?: string };
+    const { code, state } = req.query as { code?: string; state?: string };
     const googleClientId = env.GOOGLE_FIT_CLIENT_ID ?? env.GOOGLE_HEALTH_CLIENT_ID;
     const googleClientSecret = env.GOOGLE_FIT_CLIENT_SECRET ?? env.GOOGLE_HEALTH_CLIENT_SECRET;
-    if (!googleClientId || !googleClientSecret || !code) {
+    const cookieState = req.cookies.google_oauth_state;
+    reply.clearCookie('google_oauth_state', { path: '/' });
+
+    const stateBuf = state ? Buffer.from(state) : null;
+    const cookieBuf = cookieState ? Buffer.from(cookieState) : null;
+    const stateMatchesCookie = !!stateBuf && !!cookieBuf
+      && stateBuf.length === cookieBuf.length
+      && crypto.timingSafeEqual(stateBuf, cookieBuf);
+
+    if (!googleClientId || !googleClientSecret || !code || !state || !stateMatchesCookie || !verifyAntiCsrfState(state)) {
       return reply.redirect('/login?error=google_auth_failed');
     }
 
