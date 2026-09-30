@@ -17,8 +17,14 @@ import { parseFhirBundle } from '../adapters/fhir.js';
 
 describe('Security Hardening & Helmet CSP / XXE (#104)', () => {
   let app: FastifyInstance;
+  let validateProductionEnv: typeof import('../env.js').validateProductionEnv;
+  let DEFAULT_PASSWORD_PEPPER: string;
 
   beforeAll(async () => {
+    const envMod = await import('../env.js');
+    validateProductionEnv = envMod.validateProductionEnv;
+    DEFAULT_PASSWORD_PEPPER = envMod.DEFAULT_PASSWORD_PEPPER;
+
     const { buildApp } = await import('../app.js');
     app = await buildApp();
   });
@@ -174,6 +180,52 @@ describe('Security Hardening & Helmet CSP / XXE (#104)', () => {
 </Bundle>`;
 
       expect(() => parseFhirBundle(maliciousFhir)).toThrow(/XXE|Entity/i);
+    });
+  });
+
+  describe('Production Startup Validation & PASSWORD_PEPPER Hardening (#110)', () => {
+    it('rejects production startup if SIGNING_KEY_PRIVATE is missing', () => {
+      const errors = validateProductionEnv(
+        { SIGNING_KEY_PUBLIC: 'pub-key', PASSWORD_PEPPER: 'custom-pepper-that-is-long-enough-32b' },
+        'custom-pepper-that-is-long-enough-32b',
+      );
+      expect(errors).toContain('SIGNING_KEY_PRIVATE');
+    });
+
+    it('rejects production startup if SIGNING_KEY_PUBLIC is missing', () => {
+      const errors = validateProductionEnv(
+        { SIGNING_KEY_PRIVATE: 'priv-key', PASSWORD_PEPPER: 'custom-pepper-that-is-long-enough-32b' },
+        'custom-pepper-that-is-long-enough-32b',
+      );
+      expect(errors).toContain('SIGNING_KEY_PUBLIC');
+    });
+
+    it('rejects production startup if raw PASSWORD_PEPPER is not provided in env', () => {
+      const errors = validateProductionEnv(
+        { SIGNING_KEY_PRIVATE: 'priv-key', SIGNING_KEY_PUBLIC: 'pub-key', PASSWORD_PEPPER: DEFAULT_PASSWORD_PEPPER },
+        undefined,
+      );
+      expect(errors.some(e => e.includes('PASSWORD_PEPPER'))).toBe(true);
+    });
+
+    it('rejects production startup if PASSWORD_PEPPER uses the hardcoded default value', () => {
+      const errors = validateProductionEnv(
+        { SIGNING_KEY_PRIVATE: 'priv-key', SIGNING_KEY_PUBLIC: 'pub-key', PASSWORD_PEPPER: DEFAULT_PASSWORD_PEPPER },
+        DEFAULT_PASSWORD_PEPPER,
+      );
+      expect(errors.some(e => e.includes('PASSWORD_PEPPER'))).toBe(true);
+    });
+
+    it('passes production startup when all required keys and a custom pepper are supplied', () => {
+      const errors = validateProductionEnv(
+        {
+          SIGNING_KEY_PRIVATE: 'priv-key',
+          SIGNING_KEY_PUBLIC: 'pub-key',
+          PASSWORD_PEPPER: 'my-super-secret-production-pepper-32b!',
+        },
+        'my-super-secret-production-pepper-32b!',
+      );
+      expect(errors).toEqual([]);
     });
   });
 });
