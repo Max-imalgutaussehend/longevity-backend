@@ -118,6 +118,65 @@ describe('Issue #98: Health Auto Export Webhook Token-Auth & Questionnaire Separ
       expect(res.statusCode).toBe(401);
     });
 
+    it('rejects webhook POST /api/sources/health-auto-export/webhook without secret even with valid session cookie (#110)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sources/health-auto-export/webhook',
+        headers: { cookie: sessionCookie },
+        payload: {
+          data: {
+            metrics: [
+              {
+                name: 'StepCount',
+                units: 'count',
+                data: [{ date: '2026-09-27T12:00:00Z', qty: 9999 }],
+              },
+            ],
+          },
+        },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('accepts webhook POST /api/sources/health-auto-export/webhook with query secret (#110)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/sources/health-auto-export/webhook?secret=${testUserSecret}`,
+        payload: {
+          data: {
+            metrics: [
+              {
+                name: 'StepCount',
+                units: 'count',
+                data: [{ date: '2026-09-27T12:00:00Z', qty: 1000 }],
+              },
+            ],
+          },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('accepts webhook POST /api/sources/health-auto-export/webhook with x-webhook-secret header (#110)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sources/health-auto-export/webhook',
+        headers: { 'x-webhook-secret': testUserSecret },
+        payload: {
+          data: {
+            metrics: [
+              {
+                name: 'StepCount',
+                units: 'count',
+                data: [{ date: '2026-09-27T12:00:00Z', qty: 1000 }],
+              },
+            ],
+          },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+    });
+
     it('allows authenticated user to fetch their webhook secret and URL', async () => {
       const res = await app.inject({
         method: 'GET',

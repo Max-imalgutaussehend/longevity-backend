@@ -148,24 +148,20 @@ export async function sourcesImportRoutes(app: FastifyInstance) {
     return reply.status(200).send(result);
   });
 
-  // Dual-mode webhook: accepts secret via query parameter, header x-webhook-secret, or session cookie
+  // Webhook: accepts secret via query parameter or header x-webhook-secret (requires secret; no session fallback to prevent CSRF #110)
   app.post('/sources/health-auto-export/webhook', async (req, reply) => {
     const querySecret = (req.query as { secret?: string })?.secret;
     const headerSecret = req.headers['x-webhook-secret'] as string | undefined;
     const secret = querySecret || headerSecret;
 
-    if (secret) {
-      const [user] = await db.select().from(users).where(eq(users.webhookSecret, secret.trim())).limit(1);
-      if (!user) {
-        return reply.status(401).send({ title: 'Ungültiges Webhook-Secret.' });
-      }
-      const payload = req.body as HaePayload;
-      const result = await ingestHealthAutoExport(user, payload);
-      return reply.status(200).send(result);
+    if (!secret || secret.trim() === '') {
+      return reply.status(401).send({ title: 'Ungültiges Webhook-Secret.' });
     }
 
-    const user = await requireUser(req, reply);
-    if (!user) return;
+    const [user] = await db.select().from(users).where(eq(users.webhookSecret, secret.trim())).limit(1);
+    if (!user) {
+      return reply.status(401).send({ title: 'Ungültiges Webhook-Secret.' });
+    }
 
     const payload = req.body as HaePayload;
     const result = await ingestHealthAutoExport(user, payload);
