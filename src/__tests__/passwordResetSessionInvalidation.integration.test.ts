@@ -5,18 +5,21 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 
-describe('Server-side session invalidation on password reset (#108)', () => {
+const HAS_DB = !!process.env.DATABASE_URL;
+
+type DbClient = typeof import('../db/client.js').db;
+type UsersTable = typeof import('../db/schema.js').users;
+type SessionsTable = typeof import('../db/schema.js').sessions;
+type IssueEmailTokenFn = typeof import('../lib/emailTokens.js').issueEmailToken;
+type UserRecord = typeof import('../db/schema.js').users.$inferSelect;
+
+describe.skipIf(!HAS_DB)('Server-side session invalidation on password reset (#108)', () => {
   let app: FastifyInstance;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let db: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let users: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let sessions: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let issueEmailToken: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let testUser: any;
+  let db: DbClient;
+  let users: UsersTable;
+  let sessions: SessionsTable;
+  let issueEmailToken: IssueEmailTokenFn;
+  let testUser: UserRecord;
   let oldSessionId: string;
 
   beforeAll(async () => {

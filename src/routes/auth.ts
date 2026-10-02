@@ -195,6 +195,7 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     const passwordHash = await hashPassword(password);
+    await req.session.destroy();
     await db.transaction(async (tx) => {
       await tx.delete(sessions).where(eq(sessions.userId, result.userId));
       await tx.update(users).set({ passwordHash }).where(eq(users.id, result.userId));
