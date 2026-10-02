@@ -21,6 +21,7 @@ import { env } from '../env.js';
 import { issueEmailToken, consumeEmailToken } from '../lib/emailTokens.js';
 import { sendMail } from '../lib/mail.js';
 import { deleteAccountTemplate } from '../lib/emailTemplates.js';
+import { buildFrontendUrl } from '../lib/urls.js';
 import '../types.js';
 
 export async function accountRoutes(app: FastifyInstance) {
@@ -358,9 +359,8 @@ export async function accountRoutes(app: FastifyInstance) {
     const ok = await verifyPassword(user.passwordHash, body.password);
     if (!ok) return reply.status(403).send({ title: 'Das eingegebene Passwort ist nicht korrekt.' });
 
-    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const token = await issueEmailToken(user.id, 'delete_account', 30 * 60 * 1000);
-    const confirmUrl = `${baseUrl}/confirm-delete-account/${token}`;
+    const confirmUrl = buildFrontendUrl(`/confirm-delete-account/${token}`, req);
     try {
       await sendMail({ to: user.email, ...deleteAccountTemplate(confirmUrl) });
     } catch (err) {

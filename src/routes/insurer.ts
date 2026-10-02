@@ -14,13 +14,13 @@ import {
   shareTokens,
   type ShareTokenMetadata,
 } from '../db/schema.js';
-import { env } from '../env.js';
 import { computeScore, evaluateHoldingPeriod, type SnapshotHistoryItem } from '../score/index.js';
 import { issueEmailToken } from '../lib/emailTokens.js';
 import { sendMail } from '../lib/mail.js';
 import { insurerInviteTemplate, insurerRequestReceivedTemplate } from '../lib/emailTemplates.js';
 import { requireRole, requireUser, getUserSamples, getVerifiedUserSamples } from './helpers.js';
 import { signTokenPayload, buildTokenPayload, getActivePrivateKey } from '../lib/signing.js';
+import { buildFrontendUrl } from '../lib/urls.js';
 import '../types.js';
 
 export async function insurerRoutes(app: FastifyInstance) {
@@ -564,8 +564,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       return { org, token };
     });
 
-    const baseUrl = env.PUBLIC_BASE_URL ?? 'http://localhost:5173';
-    const inviteUrl = `${baseUrl}/insurer-invite/${token}`;
+    const inviteUrl = buildFrontendUrl(`/insurer-invite/${token}`, req);
     try {
       await sendMail({ to: request.contactEmail, ...insurerInviteTemplate(request.company, inviteUrl) });
     } catch (err) {
@@ -606,8 +605,7 @@ export async function insurerRoutes(app: FastifyInstance) {
     if (!insurerUser) return reply.status(404).send({ title: 'Zugehöriger Nutzer nicht gefunden.' });
 
     const token = await issueEmailToken(insurerUser.id, 'insurer_invite', 7 * 24 * 60 * 60 * 1000);
-    const baseUrl = env.PUBLIC_BASE_URL ?? 'http://localhost:5173';
-    const inviteUrl = `${baseUrl}/insurer-invite/${token}`;
+    const inviteUrl = buildFrontendUrl(`/insurer-invite/${token}`, req);
     try {
       await sendMail({ to: request.contactEmail, ...insurerInviteTemplate(request.company, inviteUrl) });
     } catch (err) {

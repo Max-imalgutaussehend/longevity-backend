@@ -13,6 +13,7 @@ import { verifyEmailTemplate, passwordResetTemplate } from '../lib/emailTemplate
 import { requireUser } from './helpers.js';
 import { setCsrfCookies, clearCsrfCookies } from '../lib/csrf.js';
 import { signAntiCsrfState, verifyAntiCsrfState } from '../lib/oauthState.js';
+import { buildFrontendUrl } from '../lib/urls.js';
 import '../types.js';
 
 export const registerSchema = z.object({
@@ -87,9 +88,8 @@ export async function authRoutes(app: FastifyInstance) {
     req.session.userId = user.id;
     setCsrfCookies(reply);
 
-    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const token = await issueEmailToken(user.id, 'verify_email');
-    const verifyUrl = `${baseUrl}/verify-email/${token}`;
+    const verifyUrl = buildFrontendUrl(`/verify-email/${token}`, req);
     let mailSent = false;
     try {
       await sendMail({ to: user.email, ...verifyEmailTemplate(verifyUrl) });
@@ -135,9 +135,8 @@ export async function authRoutes(app: FastifyInstance) {
     if (!user) return;
     if (user.emailVerifiedAt) return reply.status(400).send({ title: 'E-Mail ist bereits bestätigt.' });
 
-    const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
     const token = await issueEmailToken(user.id, 'verify_email');
-    const verifyUrl = `${baseUrl}/verify-email/${token}`;
+    const verifyUrl = buildFrontendUrl(`/verify-email/${token}`, req);
     try {
       await sendMail({ to: user.email, ...verifyEmailTemplate(verifyUrl) });
     } catch (err) {
@@ -162,9 +161,8 @@ export async function authRoutes(app: FastifyInstance) {
     const cleanEmail = email.trim().toLowerCase();
     const [user] = await db.select().from(users).where(eq(users.email, cleanEmail)).limit(1);
     if (user) {
-      const baseUrl = env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.hostname}`;
       const token = await issueEmailToken(user.id, 'reset_password');
-      const resetUrl = `${baseUrl}/reset-password/${token}`;
+      const resetUrl = buildFrontendUrl(`/reset-password/${token}`, req);
       try {
         await sendMail({ to: user.email, ...passwordResetTemplate(resetUrl) });
       } catch (err) {

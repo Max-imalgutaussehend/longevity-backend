@@ -69,6 +69,15 @@ export const CLOUD_VERIFIED_ADAPTERS = new Set([
   'oauth',
 ]);
 
+/** Adapters that do not require cloud OAuth handshake and are immediately ready upon setup */
+export const SELF_CONNECTED_ADAPTERS = new Set([
+  'mock',
+  'manual',
+  'health_auto_export',
+  'upload',
+  'fhir',
+]);
+
 export function determineSourceTrustLevel(adapter: string, credentials?: unknown): SourceTrustLevel {
   if (adapter === 'mock') return 'mock';
   if (adapter === 'fhir') return 'certified_medical';
