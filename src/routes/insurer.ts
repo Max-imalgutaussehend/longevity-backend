@@ -14,7 +14,6 @@ import {
   shareTokens,
   type ShareTokenMetadata,
 } from '../db/schema.js';
-import { env } from '../env.js';
 import { computeScore, evaluateHoldingPeriod, type SnapshotHistoryItem } from '../score/index.js';
 import { issueEmailToken } from '../lib/emailTokens.js';
 import { sendMail } from '../lib/mail.js';

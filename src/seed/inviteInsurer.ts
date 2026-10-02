@@ -4,7 +4,6 @@ import { db } from '../db/client.js';
 import { organizations, users, emailTokens } from '../db/schema.js';
 import { sendMail } from '../lib/mail.js';
 import { insurerInviteTemplate } from '../lib/emailTemplates.js';
-import { env } from '../env.js';
 import { buildFrontendUrl } from '../lib/urls.js';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
