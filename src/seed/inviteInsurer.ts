@@ -5,6 +5,7 @@ import { organizations, users, emailTokens } from '../db/schema.js';
 import { sendMail } from '../lib/mail.js';
 import { insurerInviteTemplate } from '../lib/emailTemplates.js';
 import { env } from '../env.js';
+import { buildFrontendUrl } from '../lib/urls.js';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -40,8 +41,7 @@ async function main() {
     return { org, user, token: id };
   });
 
-  const baseUrl = env.PUBLIC_BASE_URL ?? 'http://localhost:5173';
-  const inviteUrl = `${baseUrl}/insurer-invite/${token}`;
+  const inviteUrl = buildFrontendUrl(`/insurer-invite/${token}`);
 
   await sendMail({ to: contactEmail, ...insurerInviteTemplate(orgName, inviteUrl) });
 

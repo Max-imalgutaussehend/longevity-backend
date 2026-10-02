@@ -8,6 +8,7 @@ import { oauthProviders, providerToSourceKind } from '../../lib/oauthProviders.j
 import { signOAuthState, verifyOAuthState } from '../../lib/oauthState.js';
 import { fetchGoogleFitSamples } from '../../adapters/googleFit.js';
 import { requireUser, upsertGoogleFitSamples, invalidateTodaySnapshot } from '../helpers.js';
+import { buildFrontendUrl } from '../../lib/urls.js';
 import '../../types.js';
 
 export async function sourcesOAuthRoutes(app: FastifyInstance) {
@@ -126,10 +127,7 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
 
     const acceptsHtml = req.headers.accept?.includes('text/html');
     if (acceptsHtml) {
-      const targetUrl = env.NODE_ENV === 'development'
-        ? `http://localhost:5173/daten?connected=${encodeURIComponent(provider)}`
-        : `/daten?connected=${encodeURIComponent(provider)}`;
-      return reply.redirect(targetUrl);
+      return reply.redirect(buildFrontendUrl(`/daten?connected=${encodeURIComponent(provider)}`, req));
     }
 
     return reply.status(200).send({ ok: true, sourceId: src.id });
@@ -205,10 +203,7 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
 
     const acceptsHtml = req.headers.accept?.includes('text/html');
     if (acceptsHtml) {
-      const targetUrl = env.NODE_ENV === 'development'
-        ? `http://localhost:5173/daten?connected=google-fit`
-        : `/daten?connected=google-fit`;
-      return reply.redirect(targetUrl);
+      return reply.redirect(buildFrontendUrl('/daten?connected=google-fit', req));
     }
 
     return reply.status(200).send({ ok: true, sourceId: src.id });

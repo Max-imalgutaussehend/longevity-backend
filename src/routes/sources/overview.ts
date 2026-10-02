@@ -5,7 +5,7 @@ import { sources, samples } from '../../db/schema.js';
 import { METRICS } from '../../score/metrics.js';
 import type { Metric } from '../../score/types.js';
 import { generate } from '../../mock/generate.js';
-import { requireUser, METRIC_LABELS, DOMAIN_LABELS, invalidateTodaySnapshot } from '../helpers.js';
+import { requireUser, METRIC_LABELS, DOMAIN_LABELS, invalidateTodaySnapshot, SELF_CONNECTED_ADAPTERS } from '../helpers.js';
 import '../../types.js';
 
 export async function sourcesOverviewRoutes(app: FastifyInstance) {
@@ -19,20 +19,21 @@ export async function sourcesOverviewRoutes(app: FastifyInstance) {
     const countMap = new Map<string, number>();
     for (const s of allSamples) countMap.set(s.sourceId, (countMap.get(s.sourceId) ?? 0) + 1);
 
-    return rows.map(s => ({
-      id: s.id,
-      kind: s.kind,
-      adapter: s.adapter,
-      enabled: s.enabled,
-      connected: ['mock', 'manual', 'health_auto_export', 'upload', 'fhir'].includes(s.adapter)
-        ? true
-        : (s.credentials !== null && s.syncStatus !== 'token_expired'),
-      syncStatus: s.syncStatus ?? (['mock', 'manual', 'health_auto_export', 'upload', 'fhir'].includes(s.adapter) ? 'ok' : (s.credentials ? 'ok' : null)),
-      syncError: s.syncError ?? null,
-      lastSyncAt: s.lastSyncAt?.toISOString() ?? null,
-      sampleCount: countMap.get(s.id) ?? 0,
-      webhookSecret: (s.kind === 'apple_health' || s.adapter === 'health_auto_export') ? user.webhookSecret : undefined,
-    }));
+    return rows.map(s => {
+      const isSelfConnected = SELF_CONNECTED_ADAPTERS.has(s.adapter);
+      return {
+        id: s.id,
+        kind: s.kind,
+        adapter: s.adapter,
+        enabled: s.enabled,
+        connected: isSelfConnected ? true : (s.credentials !== null && s.syncStatus !== 'token_expired'),
+        syncStatus: s.syncStatus ?? (isSelfConnected ? 'ok' : (s.credentials ? 'ok' : null)),
+        syncError: s.syncError ?? null,
+        lastSyncAt: s.lastSyncAt?.toISOString() ?? null,
+        sampleCount: countMap.get(s.id) ?? 0,
+        webhookSecret: (s.kind === 'apple_health' || s.adapter === 'health_auto_export') ? user.webhookSecret : undefined,
+      };
+    });
   });
 
   app.get('/samples/summary', async (req, reply) => {
