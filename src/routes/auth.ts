@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { env } from '../env.js';
 import { db } from '../db/client.js';
-import { users, organizations } from '../db/schema.js';
+import { users, organizations, sessions } from '../db/schema.js';
 import { isWeakPassword } from '../lib/weakPasswords.js';
 import { hashPassword, verifyPasswordWithRehash, passwordSchema } from '../lib/password.js';
 import { issueEmailToken, consumeEmailToken } from '../lib/emailTokens.js';
@@ -195,7 +195,10 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     const passwordHash = await hashPassword(password);
-    await db.update(users).set({ passwordHash }).where(eq(users.id, result.userId));
+    await db.transaction(async (tx) => {
+      await tx.delete(sessions).where(eq(sessions.userId, result.userId));
+      await tx.update(users).set({ passwordHash }).where(eq(users.id, result.userId));
+    });
 
     return reply.status(200).send({ ok: true });
   });
