@@ -488,13 +488,6 @@ export async function insurerRoutes(app: FastifyInstance) {
     const { id: offerId } = req.params as { id: string };
     const [offer] = await db.select().from(partnerOffers).where(eq(partnerOffers.id, offerId)).limit(1);
     if (!offer) return reply.status(404).send({ title: 'Angebot nicht gefunden.' });
-    if (!offer.organizationId && offer.benefitType !== 'voucher' && offer.benefitType !== 'certificate') {
-      return reply.status(400).send({ title: 'Dieses Angebot unterstützt keine direkte Einreichung.' });
-    }
-    // If the offer is members-only, user must belong to that organization
-    if (offer.membersOnly && offer.organizationId && offer.organizationId !== user.organizationId) {
-      return reply.status(403).send({ title: 'Dieses Angebot ist nur für Mitglieder der ausstellenden Krankenkasse verfügbar.' });
-    }
 
     const body = (req.body as {
       payoutMethod?: PayoutMethod;
@@ -503,6 +496,14 @@ export async function insurerRoutes(app: FastifyInstance) {
       kvnr?: string;
       contactEmail?: string;
     }) || {};
+
+    if (!offer.organizationId && offer.benefitType !== 'voucher' && offer.benefitType !== 'certificate' && body.payoutMethod !== 'self_submitted') {
+      return reply.status(400).send({ title: 'Dieses Angebot unterstützt keine direkte Einreichung.' });
+    }
+    // If the offer is members-only, user must belong to that organization
+    if (offer.membersOnly && offer.organizationId && offer.organizationId !== user.organizationId) {
+      return reply.status(403).send({ title: 'Dieses Angebot ist nur für Mitglieder der ausstellenden Krankenkasse verfügbar.' });
+    }
 
     const now = new Date();
     const userSamples = await getUserSamples(user.id);
