@@ -34,12 +34,22 @@ export async function scoreRoutes(app: FastifyInstance) {
 
     // Lazy upsert today's snapshot
     const today = now.toISOString().slice(0, 10);
-    const [existing] = await db.select({ id: scoreSnapshots.id, engineVersion: scoreSnapshots.engineVersion })
+    const [existing] = await db.select({
+      id: scoreSnapshots.id,
+      score: scoreSnapshots.score,
+      coverage: scoreSnapshots.coverage,
+      engineVersion: scoreSnapshots.engineVersion,
+    })
       .from(scoreSnapshots)
       .where(and(eq(scoreSnapshots.userId, user.id), eq(scoreSnapshots.computedFor, today)))
       .limit(1);
 
-    if (!existing || existing.engineVersion !== result.engineVersion) {
+    if (
+      !existing ||
+      existing.score !== result.score ||
+      existing.coverage !== result.coverage ||
+      existing.engineVersion !== result.engineVersion
+    ) {
       await db.insert(scoreSnapshots).values({
         userId: user.id,
         computedFor: today,
