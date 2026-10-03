@@ -1,22 +1,24 @@
 import { db } from '../db/client.js';
 import { partnerOffers } from '../db/schema.js';
 
-const DEMO_OFFERS = [
+const DEMO_OFFERS: (typeof partnerOffers.$inferInsert)[] = [
   {
     partnerName: 'Gothaer Krankenversicherung',
     title: '15 % Beitragsnachlass',
     description: 'Mitglieder mit einem Vitalitätsscore im Band 60+ erhalten bei Neuabschluss einer Zusatzkrankenversicherung 15 % Rabatt auf den Monatsbeitrag.',
     minBand: 60,
     valueLabel: '15 % Rabatt',
+    benefitType: 'payout',
     isDemo: true,
     sortOrder: 1,
   },
   {
     partnerName: 'Techniker Krankenkasse',
     title: 'Bonus-Programm: 100 € Prämie',
-    description: 'Erreiche Band 70 oder höher und erhalte einmalig 100 € als Gesundheitsprämie über das TK-Bonusprogramm.',
+    description: 'Erreiche Band 70 oder höher und erhalte einmalig 100 € als Gesundheitsprämie über das TK-Bonusprogramm (§ 65a SGB V).',
     minBand: 70,
     valueLabel: '100 € Prämie',
+    benefitType: 'payout',
     isDemo: true,
     sortOrder: 2,
   },
@@ -26,6 +28,7 @@ const DEMO_OFFERS = [
     description: 'Ein Vitalitätsscore im Band 50+ führt bei der Allianz zur Einstufung in die Niedrigrisikogruppe – mit entsprechend reduzierten Risikoprämien.',
     minBand: 50,
     valueLabel: 'Niedrigrisikogruppe',
+    benefitType: 'certificate',
     isDemo: true,
     sortOrder: 3,
   },
@@ -35,6 +38,9 @@ const DEMO_OFFERS = [
     description: 'Mit einem nachgewiesenen Vitalitätsscore erhältst du Zugang zu einer kostenlosen 7-Tage-Testmitgliedschaft im Urban Sports Club.',
     minBand: 0,
     valueLabel: '7 Tage gratis',
+    benefitType: 'voucher',
+    voucherCode: 'LONGEVITY-USC-7D',
+    partnerUrl: 'https://urbansportsclub.com',
     isDemo: true,
     sortOrder: 4,
   },
@@ -44,6 +50,8 @@ const DEMO_OFFERS = [
     description: 'Mitglieder der Vitalitäts-Elite (Band 80+) erhalten einen Jahresvorrat Mineralwasser als Dankeschön für ihre Gesundheitsleistungen.',
     minBand: 80,
     valueLabel: 'Jahresvorrat',
+    benefitType: 'voucher',
+    voucherCode: 'VITAL-ELITE-WATER',
     isDemo: true,
     sortOrder: 5,
   },

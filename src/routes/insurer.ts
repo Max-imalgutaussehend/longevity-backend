@@ -13,6 +13,9 @@ import {
   benefitClaims,
   shareTokens,
   type ShareTokenMetadata,
+  type BenefitType,
+  type PayoutMethod,
+  type RewardPayload,
 } from '../db/schema.js';
 import { computeScore, evaluateHoldingPeriod, type SnapshotHistoryItem } from '../score/index.js';
 import { issueEmailToken } from '../lib/emailTokens.js';
@@ -21,6 +24,7 @@ import { insurerInviteTemplate, insurerRequestReceivedTemplate } from '../lib/em
 import { requireRole, requireUser, getUserSamples, getVerifiedUserSamples } from './helpers.js';
 import { signTokenPayload, buildTokenPayload, getActivePrivateKey } from '../lib/signing.js';
 import { buildFrontendUrl } from '../lib/urls.js';
+import { isValidIban, maskIban } from '../lib/iban.js';
 import '../types.js';
 
 export async function insurerRoutes(app: FastifyInstance) {
@@ -87,7 +91,15 @@ export async function insurerRoutes(app: FastifyInstance) {
     let band = { low: 0, high: 100 };
     let snapshots: SnapshotHistoryItem[] = [];
     let userOrganizationId: string | null = null;
-    const claimByOfferId = new Map<string, { status: string; submittedAt: Date }>();
+    const claimByOfferId = new Map<string, {
+      id: string;
+      status: string;
+      submittedAt: Date;
+      payoutMethod: string | null;
+      payoutIbanMasked: string | null;
+      rewardPayload: RewardPayload | null;
+      rejectionReason: string | null;
+    }>();
     if (userId) {
       const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
       if (user) {
@@ -107,9 +119,14 @@ export async function insurerRoutes(app: FastifyInstance) {
           .orderBy(desc(scoreSnapshots.computedFor));
 
         const claims = await db.select({
+          id: benefitClaims.id,
           offerId: benefitClaims.offerId,
           status: benefitClaims.status,
           submittedAt: benefitClaims.submittedAt,
+          payoutMethod: benefitClaims.payoutMethod,
+          payoutIbanMasked: benefitClaims.payoutIbanMasked,
+          rewardPayload: benefitClaims.rewardPayload,
+          rejectionReason: benefitClaims.rejectionReason,
         }).from(benefitClaims)
           .where(eq(benefitClaims.userId, userId))
           .orderBy(desc(benefitClaims.submittedAt));
@@ -146,11 +163,21 @@ export async function insurerRoutes(app: FastifyInstance) {
           valueLabel: o.valueLabel,
           isDemo: o.isDemo,
           membersOnly: o.membersOnly,
+          benefitType: o.benefitType,
+          voucherCode: o.voucherCode,
+          partnerUrl: o.partnerUrl,
+          validFrom: o.validFrom?.toISOString() ?? null,
+          validUntil: o.validUntil?.toISOString() ?? null,
           qualified: holding.qualified,
           daysHeld: holding.daysHeld,
           daysRemaining: holding.daysRemaining,
+          claimId: claim?.id ?? null,
           claimStatus: claim?.status ?? null,
-          claimSubmittedAt: claim?.submittedAt.toISOString() ?? null,
+          claimSubmittedAt: claim?.submittedAt ? claim.submittedAt.toISOString() : null,
+          payoutMethod: claim?.payoutMethod ?? null,
+          payoutIbanMasked: claim?.payoutIbanMasked ?? null,
+          rewardPayload: claim?.rewardPayload ?? null,
+          rejectionReason: claim?.rejectionReason ?? null,
         };
       });
   };
@@ -177,6 +204,9 @@ export async function insurerRoutes(app: FastifyInstance) {
       validFrom: o.validFrom?.toISOString() ?? null,
       validUntil: o.validUntil?.toISOString() ?? null,
       membersOnly: o.membersOnly,
+      benefitType: o.benefitType,
+      voucherCode: o.voucherCode,
+      partnerUrl: o.partnerUrl,
     }));
   });
 
@@ -194,8 +224,11 @@ export async function insurerRoutes(app: FastifyInstance) {
       validFrom?: string;
       validUntil?: string;
       membersOnly?: boolean;
+      benefitType?: BenefitType;
+      voucherCode?: string;
+      partnerUrl?: string;
     };
-    const { title, description, minBand, minMonths, valueLabel, validFrom, validUntil, membersOnly } = body;
+    const { title, description, minBand, minMonths, valueLabel, validFrom, validUntil, membersOnly, benefitType, voucherCode, partnerUrl } = body;
 
     if (!title || !description || minBand === undefined || !valueLabel) {
       return reply.status(400).send({ title: 'Pflichtfelder fehlen.' });
@@ -205,6 +238,9 @@ export async function insurerRoutes(app: FastifyInstance) {
     }
     if (minMonths !== undefined && (minMonths < 0 || minMonths > 36)) {
       return reply.status(400).send({ title: 'Mindesthaltedauer muss zwischen 0 und 36 Monaten liegen.' });
+    }
+    if (benefitType && !['payout', 'voucher', 'certificate'].includes(benefitType)) {
+      return reply.status(400).send({ title: 'Ungültige Art des Vorteils.' });
     }
 
     const [org] = await db.select().from(organizations).where(eq(organizations.id, user.organizationId)).limit(1);
@@ -221,6 +257,9 @@ export async function insurerRoutes(app: FastifyInstance) {
       validUntil: validUntil ? new Date(validUntil) : null,
       isDemo: false,
       membersOnly: membersOnly ?? true,
+      benefitType: benefitType ?? 'payout',
+      voucherCode: voucherCode?.trim() || null,
+      partnerUrl: partnerUrl?.trim() || null,
     }).returning();
 
     return reply.status(201).send({
@@ -233,6 +272,9 @@ export async function insurerRoutes(app: FastifyInstance) {
       validFrom: offer.validFrom?.toISOString() ?? null,
       validUntil: offer.validUntil?.toISOString() ?? null,
       membersOnly: offer.membersOnly,
+      benefitType: offer.benefitType,
+      voucherCode: offer.voucherCode,
+      partnerUrl: offer.partnerUrl,
     });
   });
 
@@ -251,6 +293,9 @@ export async function insurerRoutes(app: FastifyInstance) {
       validFrom?: string | null;
       validUntil?: string | null;
       membersOnly?: boolean;
+      benefitType?: BenefitType;
+      voucherCode?: string | null;
+      partnerUrl?: string | null;
     };
 
     if (body.minBand !== undefined && (body.minBand < 0 || body.minBand > 100)) {
@@ -258,6 +303,9 @@ export async function insurerRoutes(app: FastifyInstance) {
     }
     if (body.minMonths !== undefined && body.minMonths !== null && (body.minMonths < 0 || body.minMonths > 36)) {
       return reply.status(400).send({ title: 'Mindesthaltedauer muss zwischen 0 und 36 Monaten liegen.' });
+    }
+    if (body.benefitType && !['payout', 'voucher', 'certificate'].includes(body.benefitType)) {
+      return reply.status(400).send({ title: 'Ungültige Art des Vorteils.' });
     }
 
     const [existing] = await db.select().from(partnerOffers)
@@ -274,6 +322,9 @@ export async function insurerRoutes(app: FastifyInstance) {
       ...(body.validFrom !== undefined && { validFrom: body.validFrom ? new Date(body.validFrom) : null }),
       ...(body.validUntil !== undefined && { validUntil: body.validUntil ? new Date(body.validUntil) : null }),
       ...(body.membersOnly !== undefined && { membersOnly: body.membersOnly }),
+      ...(body.benefitType !== undefined && { benefitType: body.benefitType }),
+      ...(body.voucherCode !== undefined && { voucherCode: body.voucherCode ? body.voucherCode.trim() : null }),
+      ...(body.partnerUrl !== undefined && { partnerUrl: body.partnerUrl ? body.partnerUrl.trim() : null }),
     }).where(eq(partnerOffers.id, id)).returning();
 
     return {
@@ -286,6 +337,9 @@ export async function insurerRoutes(app: FastifyInstance) {
       validFrom: updated.validFrom?.toISOString() ?? null,
       validUntil: updated.validUntil?.toISOString() ?? null,
       membersOnly: updated.membersOnly,
+      benefitType: updated.benefitType,
+      voucherCode: updated.voucherCode,
+      partnerUrl: updated.partnerUrl,
     };
   });
 
@@ -307,12 +361,19 @@ export async function insurerRoutes(app: FastifyInstance) {
     const { id: offerId } = req.params as { id: string };
     const [offer] = await db.select().from(partnerOffers).where(eq(partnerOffers.id, offerId)).limit(1);
     if (!offer) return reply.status(404).send({ title: 'Angebot nicht gefunden.' });
-    if (!offer.organizationId) {
+    if (!offer.organizationId && offer.benefitType !== 'voucher' && offer.benefitType !== 'certificate') {
       return reply.status(400).send({ title: 'Dieses Angebot unterstützt keine direkte Einreichung.' });
     }
-    if (offer.membersOnly && offer.organizationId !== user.organizationId) {
+    // If the offer is members-only, user must belong to that organization
+    if (offer.membersOnly && offer.organizationId && offer.organizationId !== user.organizationId) {
       return reply.status(403).send({ title: 'Dieses Angebot ist nur für Mitglieder der ausstellenden Krankenkasse verfügbar.' });
     }
+
+    const body = (req.body as {
+      payoutMethod?: PayoutMethod;
+      iban?: string;
+      accountHolder?: string;
+    }) || {};
 
     const now = new Date();
     const userSamples = await getUserSamples(user.id);
@@ -350,6 +411,51 @@ export async function insurerRoutes(app: FastifyInstance) {
       return reply.status(409).send({ title: 'Für dieses Angebot liegt bereits eine Einreichung vor.' });
     }
 
+    let chosenMethod: PayoutMethod = body.payoutMethod || (offer.benefitType === 'voucher' ? 'voucher' : offer.benefitType === 'certificate' ? 'self_submitted' : 'bank_transfer');
+    let maskedIban: string | null = null;
+    let accountHolder: string | null = null;
+    let rewardPayload: RewardPayload | null = null;
+    let claimStatus: 'submitted' | 'accepted' = 'submitted';
+    let decidedAt: Date | null = null;
+
+    if (offer.benefitType === 'voucher' || chosenMethod === 'voucher') {
+      chosenMethod = 'voucher';
+      claimStatus = 'accepted';
+      decidedAt = now;
+      const code = offer.voucherCode || `LONG-${offer.partnerName.replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`;
+      rewardPayload = {
+        voucherCode: code,
+        ...(offer.partnerUrl ? { partnerUrl: offer.partnerUrl } : {}),
+      };
+    } else if (offer.benefitType === 'certificate' || chosenMethod === 'self_submitted') {
+      chosenMethod = 'self_submitted';
+      claimStatus = 'accepted';
+      decidedAt = now;
+    } else {
+      if (chosenMethod === 'contribution_offset') {
+        if (!offer.organizationId || user.organizationId !== offer.organizationId) {
+          return reply.status(400).send({ title: 'Beitragsverrechnung ist nur für verifizierte Mitglieder dieser Krankenkasse verfügbar.' });
+        }
+      } else {
+        if (body.iban) {
+          if (!isValidIban(body.iban)) {
+            return reply.status(400).send({ title: 'Bitte eine gültige IBAN angeben.' });
+          }
+          chosenMethod = 'bank_transfer';
+          maskedIban = maskIban(body.iban);
+          accountHolder = body.accountHolder?.trim() || user.displayName || user.email;
+        } else if (body.payoutMethod === 'bank_transfer') {
+          return reply.status(400).send({ title: 'Bitte eine gültige IBAN angeben.' });
+        } else {
+          if (offer.organizationId && user.organizationId === offer.organizationId) {
+            chosenMethod = 'contribution_offset';
+          } else {
+            chosenMethod = 'bank_transfer';
+          }
+        }
+      }
+    }
+
     const sampleData = await getVerifiedUserSamples(user.id);
     const privateKey = getActivePrivateKey();
     if (!privateKey) return reply.status(500).send({ title: 'Signierschlüssel nicht konfiguriert.' });
@@ -366,7 +472,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       totalSampleCount: sampleData.totalSampleCount,
       excludedSampleCount: sampleData.excludedSampleCount,
       activeDays: sampleData.activeDays,
-      certificateType: 'Standard Score-Nachweis',
+      certificateType: chosenMethod === 'self_submitted' ? '§ 65a SGB V Kassen-Nachweis' : 'Standard Score-Nachweis',
     };
 
     await db.insert(shareTokens).values({
@@ -383,17 +489,179 @@ export async function insurerRoutes(app: FastifyInstance) {
     const [claim] = await db.insert(benefitClaims).values({
       userId: user.id,
       offerId,
-      organizationId: offer.organizationId,
+      organizationId: offer.organizationId ?? null,
       shareTokenId: tokenId,
       bandLow: score.band.low,
       bandHigh: score.band.high,
+      status: claimStatus,
+      payoutMethod: chosenMethod,
+      payoutIbanMasked: maskedIban,
+      payoutAccountHolder: accountHolder,
+      rewardPayload,
+      decidedAt,
+      selfSubmittedAt: chosenMethod === 'self_submitted' ? now : null,
+      reminderAt: chosenMethod === 'self_submitted' ? new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000) : null,
     }).returning();
 
     return reply.status(201).send({
       id: claim.id,
       status: claim.status,
       submittedAt: claim.submittedAt.toISOString(),
+      payoutMethod: claim.payoutMethod,
+      payoutIbanMasked: claim.payoutIbanMasked,
+      rewardPayload: claim.rewardPayload,
+      shareTokenId: tokenId,
+      verifyUrl: `/verify/${tokenId}`,
     });
+  });
+
+  app.get('/me/claims', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const rows = await db.select({
+      id: benefitClaims.id,
+      offerId: benefitClaims.offerId,
+      status: benefitClaims.status,
+      bandLow: benefitClaims.bandLow,
+      bandHigh: benefitClaims.bandHigh,
+      payoutMethod: benefitClaims.payoutMethod,
+      payoutIbanMasked: benefitClaims.payoutIbanMasked,
+      payoutAccountHolder: benefitClaims.payoutAccountHolder,
+      rewardPayload: benefitClaims.rewardPayload,
+      rejectionReason: benefitClaims.rejectionReason,
+      selfSubmittedAt: benefitClaims.selfSubmittedAt,
+      reminderAt: benefitClaims.reminderAt,
+      submittedAt: benefitClaims.submittedAt,
+      decidedAt: benefitClaims.decidedAt,
+      shareTokenId: benefitClaims.shareTokenId,
+      offerTitle: partnerOffers.title,
+      offerPartnerName: partnerOffers.partnerName,
+      offerDescription: partnerOffers.description,
+      offerValueLabel: partnerOffers.valueLabel,
+      offerBenefitType: partnerOffers.benefitType,
+      offerPartnerUrl: partnerOffers.partnerUrl,
+    }).from(benefitClaims)
+      .innerJoin(partnerOffers, eq(benefitClaims.offerId, partnerOffers.id))
+      .where(eq(benefitClaims.userId, user.id))
+      .orderBy(desc(benefitClaims.submittedAt));
+
+    return rows.map(r => ({
+      id: r.id,
+      offerId: r.offerId,
+      status: r.status,
+      bandLow: r.bandLow,
+      bandHigh: r.bandHigh,
+      payoutMethod: r.payoutMethod,
+      payoutIbanMasked: r.payoutIbanMasked,
+      payoutAccountHolder: r.payoutAccountHolder,
+      rewardPayload: r.rewardPayload,
+      rejectionReason: r.rejectionReason,
+      selfSubmittedAt: r.selfSubmittedAt?.toISOString() ?? null,
+      reminderAt: r.reminderAt?.toISOString() ?? null,
+      submittedAt: r.submittedAt.toISOString(),
+      decidedAt: r.decidedAt?.toISOString() ?? null,
+      shareTokenId: r.shareTokenId,
+      verifyUrl: `/verify/${r.shareTokenId}`,
+      offer: {
+        id: r.offerId,
+        title: r.offerTitle,
+        partnerName: r.offerPartnerName,
+        description: r.offerDescription,
+        valueLabel: r.offerValueLabel,
+        benefitType: r.offerBenefitType,
+        partnerUrl: r.offerPartnerUrl,
+      },
+    }));
+  });
+
+  app.patch('/me/claims/:id', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { id } = req.params as { id: string };
+    const body = req.body as {
+      selfSubmitted?: boolean;
+      reminderDays?: number;
+    };
+
+    const [existing] = await db.select().from(benefitClaims)
+      .where(and(eq(benefitClaims.id, id), eq(benefitClaims.userId, user.id)))
+      .limit(1);
+
+    if (!existing) return reply.status(404).send({ title: 'Einreichung nicht gefunden.' });
+
+    const updateData: Partial<typeof benefitClaims.$inferInsert> = {};
+    if (body.selfSubmitted) {
+      updateData.selfSubmittedAt = new Date();
+      const days = body.reminderDays ?? 14;
+      updateData.reminderAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    }
+
+    const [updated] = await db.update(benefitClaims)
+      .set(updateData)
+      .where(eq(benefitClaims.id, id))
+      .returning();
+
+    return {
+      id: updated.id,
+      selfSubmittedAt: updated.selfSubmittedAt?.toISOString() ?? null,
+      reminderAt: updated.reminderAt?.toISOString() ?? null,
+    };
+  });
+
+  app.get('/claims/:id/receipt', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const { id } = req.params as { id: string };
+    const [claim] = await db.select({
+      id: benefitClaims.id,
+      userId: benefitClaims.userId,
+      organizationId: benefitClaims.organizationId,
+      status: benefitClaims.status,
+      bandLow: benefitClaims.bandLow,
+      bandHigh: benefitClaims.bandHigh,
+      payoutMethod: benefitClaims.payoutMethod,
+      payoutIbanMasked: benefitClaims.payoutIbanMasked,
+      payoutAccountHolder: benefitClaims.payoutAccountHolder,
+      rewardPayload: benefitClaims.rewardPayload,
+      submittedAt: benefitClaims.submittedAt,
+      decidedAt: benefitClaims.decidedAt,
+      offerTitle: partnerOffers.title,
+      offerPartnerName: partnerOffers.partnerName,
+      offerValueLabel: partnerOffers.valueLabel,
+      userDisplayName: users.displayName,
+      userEmail: users.email,
+    }).from(benefitClaims)
+      .innerJoin(partnerOffers, eq(benefitClaims.offerId, partnerOffers.id))
+      .innerJoin(users, eq(benefitClaims.userId, users.id))
+      .where(eq(benefitClaims.id, id))
+      .limit(1);
+
+    if (!claim) return reply.status(404).send({ title: 'Beleg nicht gefunden.' });
+    if (claim.userId !== user.id && user.organizationId !== claim.organizationId && user.role !== 'platform_admin') {
+      return reply.status(403).send({ title: 'Keine Berechtigung.' });
+    }
+
+    return {
+      receiptNumber: `REC-${claim.id.slice(0, 8).toUpperCase()}`,
+      claimId: claim.id,
+      status: claim.status,
+      userDisplayName: claim.userDisplayName ?? claim.userEmail,
+      userEmail: claim.userEmail,
+      offerTitle: claim.offerTitle,
+      partnerName: claim.offerPartnerName,
+      valueLabel: claim.offerValueLabel,
+      payoutMethod: claim.payoutMethod,
+      payoutIbanMasked: claim.payoutIbanMasked,
+      payoutAccountHolder: claim.payoutAccountHolder,
+      transactionRef: claim.rewardPayload?.transactionRef ?? null,
+      note: claim.rewardPayload?.note ?? null,
+      voucherCode: claim.rewardPayload?.voucherCode ?? null,
+      submittedAt: claim.submittedAt.toISOString(),
+      decidedAt: claim.decidedAt?.toISOString() ?? null,
+    };
   });
 
   app.get('/insurer/claims', async (req, reply) => {
@@ -406,6 +674,11 @@ export async function insurerRoutes(app: FastifyInstance) {
       status: benefitClaims.status,
       bandLow: benefitClaims.bandLow,
       bandHigh: benefitClaims.bandHigh,
+      payoutMethod: benefitClaims.payoutMethod,
+      payoutIbanMasked: benefitClaims.payoutIbanMasked,
+      payoutAccountHolder: benefitClaims.payoutAccountHolder,
+      rewardPayload: benefitClaims.rewardPayload,
+      rejectionReason: benefitClaims.rejectionReason,
       submittedAt: benefitClaims.submittedAt,
       decidedAt: benefitClaims.decidedAt,
       shareTokenId: benefitClaims.shareTokenId,
@@ -423,6 +696,11 @@ export async function insurerRoutes(app: FastifyInstance) {
       status: r.status,
       bandLow: r.bandLow,
       bandHigh: r.bandHigh,
+      payoutMethod: r.payoutMethod,
+      payoutIbanMasked: r.payoutIbanMasked,
+      payoutAccountHolder: r.payoutAccountHolder,
+      rewardPayload: r.rewardPayload,
+      rejectionReason: r.rejectionReason,
       submittedAt: r.submittedAt.toISOString(),
       decidedAt: r.decidedAt?.toISOString() ?? null,
       offerTitle: r.offerTitle,
@@ -438,7 +716,12 @@ export async function insurerRoutes(app: FastifyInstance) {
     if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
 
     const { id } = req.params as { id: string };
-    const body = req.body as { decision?: 'accepted' | 'rejected' };
+    const body = req.body as {
+      decision?: 'accepted' | 'rejected';
+      note?: string;
+      transactionRef?: string;
+      rejectionReason?: string;
+    };
     if (body.decision !== 'accepted' && body.decision !== 'rejected') {
       return reply.status(400).send({ title: 'Ungültige Entscheidung.' });
     }
@@ -451,16 +734,26 @@ export async function insurerRoutes(app: FastifyInstance) {
       return reply.status(409).send({ title: 'Über diese Einreichung wurde bereits entschieden.' });
     }
 
+    const rewardPayload = {
+      ...(existing.rewardPayload || {}),
+      ...(body.transactionRef ? { transactionRef: body.transactionRef.trim() } : {}),
+      ...(body.note ? { note: body.note.trim() } : {}),
+    };
+
     const [updated] = await db.update(benefitClaims).set({
       status: body.decision,
       decidedAt: new Date(),
       decidedBy: user.id,
+      rejectionReason: body.decision === 'rejected' ? (body.rejectionReason?.trim() || null) : null,
+      rewardPayload: Object.keys(rewardPayload).length > 0 ? rewardPayload : null,
     }).where(eq(benefitClaims.id, id)).returning();
 
     return {
       id: updated.id,
       status: updated.status,
       decidedAt: updated.decidedAt?.toISOString() ?? null,
+      rejectionReason: updated.rejectionReason,
+      rewardPayload: updated.rewardPayload,
     };
   });
 

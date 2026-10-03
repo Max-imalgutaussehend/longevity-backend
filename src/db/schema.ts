@@ -122,6 +122,9 @@ export const shareTokens = pgTable('share_tokens', {
   metadata: jsonb('metadata').$type<ShareTokenMetadata>(),
 }, (t) => ({ userIdx: index().on(t.userId) }));
 
+export const BENEFIT_TYPES = ['payout', 'voucher', 'certificate'] as const;
+export type BenefitType = typeof BENEFIT_TYPES[number];
+
 export const partnerOffers = pgTable('partner_offers', {
   id: uuid('id').primaryKey().defaultRandom(),
   organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
@@ -140,10 +143,23 @@ export const partnerOffers = pgTable('partner_offers', {
   // users as a general promotion. Meaningless for organization-less offers,
   // which are always visible to everyone regardless of this flag.
   membersOnly: boolean('members_only').notNull().default(true),
+  benefitType: text('benefit_type').$type<BenefitType>().notNull().default('payout'),
+  voucherCode: text('voucher_code'),
+  partnerUrl: text('partner_url'),
 }, (t) => ({ orgIdx: index().on(t.organizationId) }));
 
 export const BENEFIT_CLAIM_STATUSES = ['submitted', 'accepted', 'rejected'] as const;
 export type BenefitClaimStatus = typeof BENEFIT_CLAIM_STATUSES[number];
+
+export const PAYOUT_METHODS = ['bank_transfer', 'contribution_offset', 'voucher', 'self_submitted'] as const;
+export type PayoutMethod = typeof PAYOUT_METHODS[number];
+
+export interface RewardPayload {
+  voucherCode?: string;
+  transactionRef?: string;
+  note?: string;
+  partnerUrl?: string;
+}
 
 // A direct in-portal submission of a qualified partner offer to its issuing
 // insurer organization (issue #87) — replaces manual link-sharing for offers
@@ -154,11 +170,18 @@ export const benefitClaims = pgTable('benefit_claims', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   offerId: uuid('offer_id').notNull().references(() => partnerOffers.id, { onDelete: 'cascade' }),
-  organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
   shareTokenId: text('share_token_id').notNull().references(() => shareTokens.id, { onDelete: 'cascade' }),
   bandLow: integer('band_low').notNull(),
   bandHigh: integer('band_high').notNull(),
   status: text('status').notNull().$type<BenefitClaimStatus>().default('submitted'),
+  payoutMethod: text('payout_method').$type<PayoutMethod>().default('bank_transfer'),
+  payoutIbanMasked: text('payout_iban_masked'),
+  payoutAccountHolder: text('payout_account_holder'),
+  rewardPayload: jsonb('reward_payload').$type<RewardPayload>(),
+  rejectionReason: text('rejection_reason'),
+  selfSubmittedAt: timestamp('self_submitted_at', { withTimezone: true }),
+  reminderAt: timestamp('reminder_at', { withTimezone: true }),
   submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
   decidedBy: uuid('decided_by').references(() => users.id, { onDelete: 'set null' }),

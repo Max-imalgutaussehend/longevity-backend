@@ -179,6 +179,9 @@ paths['/insurer/offers'] = {
         minMonths: { type: 'integer', minimum: 0, maximum: 36, nullable: true },
         valueLabel: { type: 'string' }, validFrom: { type: 'string', format: 'date-time' }, validUntil: { type: 'string', format: 'date-time' },
         membersOnly: { type: 'boolean', description: 'Exclusive to the organization\'s own verified members (default true) vs. visible to all users.' },
+        benefitType: { type: 'string', enum: ['payout', 'voucher', 'certificate'] },
+        voucherCode: { type: ['string', 'null'] },
+        partnerUrl: { type: ['string', 'null'] },
       },
     } } } },
     responses: { 201: { description: 'Created' }, 400: { description: 'Validation error' }, 403: { description: 'Not an insurer role' }, 404: { description: 'No organization assigned' }, ...auth401 } },
@@ -194,6 +197,9 @@ paths['/insurer/offers/{id}'] = {
         minMonths: { type: 'integer', minimum: 0, maximum: 36, nullable: true },
         valueLabel: { type: 'string' }, validFrom: { type: 'string', format: 'date-time', nullable: true }, validUntil: { type: 'string', format: 'date-time', nullable: true },
         membersOnly: { type: 'boolean' },
+        benefitType: { type: 'string', enum: ['payout', 'voucher', 'certificate'] },
+        voucherCode: { type: ['string', 'null'] },
+        partnerUrl: { type: ['string', 'null'] },
       },
     } } } },
     responses: { 200: { description: 'Updated' }, 400: { description: 'Validation error' }, 403: { description: 'Not an insurer role' }, 404: { description: 'Not found or not owned by this organization' }, ...auth401 } },
@@ -520,15 +526,48 @@ paths['/offers'] = {
 };
 
 paths['/offers/{id}/claim'] = {
-  post: { operationId: 'submitBenefitClaim', tags: ['Offers'], summary: 'Submit a qualified offer directly to its issuing insurer',
+  post: { operationId: 'submitBenefitClaim', tags: ['Offers'], summary: 'Submit a qualified offer directly to its issuing insurer or claim reward',
     parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    requestBody: { content: { 'application/json': { schema: {
+      type: 'object',
+      properties: {
+        payoutMethod: { type: 'string', enum: ['bank_transfer', 'contribution_offset', 'voucher', 'self_submitted'] },
+        iban: { type: 'string' },
+        accountHolder: { type: 'string' },
+      },
+    } } } },
     responses: {
       201: { description: 'Created', content: { 'application/json': { schema: ref('BenefitClaim') } } },
       400: { description: 'Offer has no organization, or holding requirements not met' },
+      403: { description: 'Members-only offer or invalid organization' },
       404: { description: 'Offer not found' },
       409: { description: 'An active (submitted or accepted) claim already exists for this offer' },
       ...auth401,
     } },
+};
+
+paths['/me/claims'] = {
+  get: { operationId: 'listMyClaims', tags: ['Offers'], summary: 'List all benefit claims for the authenticated user',
+    responses: {
+      200: { description: 'UserClaim[]', content: { 'application/json': { schema: { type: 'array', items: ref('UserClaim') } } } },
+      ...auth401,
+    } },
+};
+
+paths['/me/claims/{id}'] = {
+  patch: { operationId: 'updateMyClaim', tags: ['Offers'], summary: 'Update claim submission status or reminders',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object',
+      properties: { selfSubmitted: { type: 'boolean' }, reminderDays: { type: 'integer' } },
+    } } } },
+    responses: { 200: { description: 'Updated' }, 404: { description: 'Not found' }, ...auth401 } },
+};
+
+paths['/claims/{id}/receipt'] = {
+  get: { operationId: 'getClaimReceipt', tags: ['Offers'], summary: 'Get official payment receipt for an accepted claim',
+    parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: { 200: { description: 'ClaimReceipt', content: { 'application/json': { schema: ref('ClaimReceipt') } } }, 403: { description: 'Forbidden' }, 404: { description: 'Not found' }, ...auth401 } },
 };
 
 paths['/insurer/claims'] = {
@@ -543,7 +582,13 @@ paths['/insurer/claims/{id}/decide'] = {
   post: { operationId: 'decideInsurerClaim', tags: ['Insurer'], summary: 'Accept or reject a submitted benefit claim',
     parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
     requestBody: { required: true, content: { 'application/json': { schema: {
-      type: 'object', required: ['decision'], properties: { decision: { type: 'string', enum: ['accepted', 'rejected'] } },
+      type: 'object', required: ['decision'],
+      properties: {
+        decision: { type: 'string', enum: ['accepted', 'rejected'] },
+        note: { type: 'string' },
+        transactionRef: { type: 'string' },
+        rejectionReason: { type: 'string' },
+      },
     } } } },
     responses: {
       200: { description: 'Decided' },
@@ -625,8 +670,18 @@ const schemas: Record<string, unknown> = {
       daysHeld: { type: 'integer' }, daysRemaining: { type: 'integer' },
       organizationId: { type: ['string', 'null'], format: 'uuid' },
       membersOnly: { type: 'boolean' },
+      benefitType: { type: 'string', enum: ['payout', 'voucher', 'certificate'] },
+      voucherCode: { type: ['string', 'null'] },
+      partnerUrl: { type: ['string', 'null'] },
+      validFrom: { type: ['string', 'null'], format: 'date-time' },
+      validUntil: { type: ['string', 'null'], format: 'date-time' },
+      claimId: { type: ['string', 'null'], format: 'uuid' },
       claimStatus: { type: ['string', 'null'], enum: ['submitted', 'accepted', 'rejected', null] },
       claimSubmittedAt: { type: ['string', 'null'], format: 'date-time' },
+      payoutMethod: { type: ['string', 'null'] },
+      payoutIbanMasked: { type: ['string', 'null'] },
+      rewardPayload: { type: ['object', 'null'] },
+      rejectionReason: { type: ['string', 'null'] },
     },
   },
   BenefitClaim: {
@@ -636,6 +691,68 @@ const schemas: Record<string, unknown> = {
       id: { type: 'string', format: 'uuid' },
       status: { type: 'string', enum: ['submitted', 'accepted', 'rejected'] },
       submittedAt: { type: 'string', format: 'date-time' },
+      payoutMethod: { type: ['string', 'null'] },
+      payoutIbanMasked: { type: ['string', 'null'] },
+      rewardPayload: { type: ['object', 'null'] },
+      shareTokenId: { type: ['string', 'null'] },
+      verifyUrl: { type: ['string', 'null'] },
+    },
+  },
+  UserClaim: {
+    type: 'object',
+    required: ['id', 'status', 'submittedAt', 'offer'],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      offerId: { type: 'string', format: 'uuid' },
+      status: { type: 'string', enum: ['submitted', 'accepted', 'rejected'] },
+      bandLow: { type: 'integer' },
+      bandHigh: { type: 'integer' },
+      payoutMethod: { type: ['string', 'null'] },
+      payoutIbanMasked: { type: ['string', 'null'] },
+      payoutAccountHolder: { type: ['string', 'null'] },
+      rewardPayload: { type: ['object', 'null'] },
+      rejectionReason: { type: ['string', 'null'] },
+      selfSubmittedAt: { type: ['string', 'null'], format: 'date-time' },
+      reminderAt: { type: ['string', 'null'], format: 'date-time' },
+      submittedAt: { type: 'string', format: 'date-time' },
+      decidedAt: { type: ['string', 'null'], format: 'date-time' },
+      shareTokenId: { type: ['string', 'null'] },
+      verifyUrl: { type: ['string', 'null'] },
+      offer: {
+        type: 'object',
+        required: ['id', 'title', 'partnerName', 'valueLabel', 'benefitType'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          title: { type: 'string' },
+          partnerName: { type: 'string' },
+          description: { type: 'string' },
+          valueLabel: { type: 'string' },
+          benefitType: { type: 'string', enum: ['payout', 'voucher', 'certificate'] },
+          partnerUrl: { type: ['string', 'null'] },
+        },
+      },
+    },
+  },
+  ClaimReceipt: {
+    type: 'object',
+    required: ['receiptNumber', 'claimId', 'status', 'userDisplayName', 'userEmail', 'offerTitle', 'partnerName', 'valueLabel', 'submittedAt'],
+    properties: {
+      receiptNumber: { type: 'string' },
+      claimId: { type: 'string', format: 'uuid' },
+      status: { type: 'string' },
+      userDisplayName: { type: 'string' },
+      userEmail: { type: 'string', format: 'email' },
+      offerTitle: { type: 'string' },
+      partnerName: { type: 'string' },
+      valueLabel: { type: 'string' },
+      payoutMethod: { type: ['string', 'null'] },
+      payoutIbanMasked: { type: ['string', 'null'] },
+      payoutAccountHolder: { type: ['string', 'null'] },
+      transactionRef: { type: ['string', 'null'] },
+      note: { type: ['string', 'null'] },
+      voucherCode: { type: ['string', 'null'] },
+      submittedAt: { type: 'string', format: 'date-time' },
+      decidedAt: { type: ['string', 'null'], format: 'date-time' },
     },
   },
   InsurerClaim: {
@@ -645,6 +762,11 @@ const schemas: Record<string, unknown> = {
       id: { type: 'string', format: 'uuid' },
       status: { type: 'string', enum: ['submitted', 'accepted', 'rejected'] },
       bandLow: { type: 'integer' }, bandHigh: { type: 'integer' },
+      payoutMethod: { type: ['string', 'null'] },
+      payoutIbanMasked: { type: ['string', 'null'] },
+      payoutAccountHolder: { type: ['string', 'null'] },
+      rewardPayload: { type: ['object', 'null'] },
+      rejectionReason: { type: ['string', 'null'] },
       submittedAt: { type: 'string', format: 'date-time' },
       decidedAt: { type: ['string', 'null'], format: 'date-time' },
       offerTitle: { type: 'string' },
