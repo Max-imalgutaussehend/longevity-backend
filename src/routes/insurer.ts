@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { eq, desc, and, inArray } from 'drizzle-orm';
+import { eq, desc, and, inArray, isNull, sql } from 'drizzle-orm';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { hashPassword } from '../lib/password.js';
 import { db } from '../db/client.js';
@@ -11,9 +11,11 @@ import {
   insurerRequests,
   emailTokens,
   benefitClaims,
+  partnerOfferVoucherCodes,
   shareTokens,
   type ShareTokenMetadata,
   type BenefitType,
+  type BenefitClaimStatus,
   type PayoutMethod,
   type RewardPayload,
 } from '../db/schema.js';
@@ -88,6 +90,14 @@ export async function insurerRoutes(app: FastifyInstance) {
     const rows = await db.select().from(partnerOffers).orderBy(partnerOffers.sortOrder);
     const userId = req.session.userId;
 
+    const poolCounts = await db.select({
+      offerId: partnerOfferVoucherCodes.offerId,
+      count: sql<number>`count(*)::int`,
+    }).from(partnerOfferVoucherCodes)
+      .where(isNull(partnerOfferVoucherCodes.claimedByUserId))
+      .groupBy(partnerOfferVoucherCodes.offerId);
+    const poolMap = new Map<string, number>(poolCounts.map(p => [p.offerId, p.count]));
+
     let band = { low: 0, high: 100 };
     let snapshots: SnapshotHistoryItem[] = [];
     let userOrganizationId: string | null = null;
@@ -97,6 +107,8 @@ export async function insurerRoutes(app: FastifyInstance) {
       submittedAt: Date;
       payoutMethod: string | null;
       payoutIbanMasked: string | null;
+      contactEmail: string | null;
+      kvnr: string | null;
       rewardPayload: RewardPayload | null;
       rejectionReason: string | null;
     }>();
@@ -125,6 +137,8 @@ export async function insurerRoutes(app: FastifyInstance) {
           submittedAt: benefitClaims.submittedAt,
           payoutMethod: benefitClaims.payoutMethod,
           payoutIbanMasked: benefitClaims.payoutIbanMasked,
+          contactEmail: benefitClaims.contactEmail,
+          kvnr: benefitClaims.kvnr,
           rewardPayload: benefitClaims.rewardPayload,
           rejectionReason: benefitClaims.rejectionReason,
         }).from(benefitClaims)
@@ -164,6 +178,8 @@ export async function insurerRoutes(app: FastifyInstance) {
           isDemo: o.isDemo,
           membersOnly: o.membersOnly,
           benefitType: o.benefitType,
+          voucherDelivery: o.voucherDelivery,
+          availableCodesCount: o.voucherDelivery === 'code_pool' ? (poolMap.get(o.id) ?? 0) : undefined,
           voucherCode: o.voucherCode,
           partnerUrl: o.partnerUrl,
           validFrom: o.validFrom?.toISOString() ?? null,
@@ -176,6 +192,8 @@ export async function insurerRoutes(app: FastifyInstance) {
           claimSubmittedAt: claim?.submittedAt ? claim.submittedAt.toISOString() : null,
           payoutMethod: claim?.payoutMethod ?? null,
           payoutIbanMasked: claim?.payoutIbanMasked ?? null,
+          contactEmail: claim?.contactEmail ?? null,
+          kvnr: claim?.kvnr ?? null,
           rewardPayload: claim?.rewardPayload ?? null,
           rejectionReason: claim?.rejectionReason ?? null,
         };
@@ -194,6 +212,14 @@ export async function insurerRoutes(app: FastifyInstance) {
       .where(eq(partnerOffers.organizationId, user.organizationId))
       .orderBy(partnerOffers.sortOrder);
 
+    const poolCounts = await db.select({
+      offerId: partnerOfferVoucherCodes.offerId,
+      count: sql<number>`count(*)::int`,
+    }).from(partnerOfferVoucherCodes)
+      .where(isNull(partnerOfferVoucherCodes.claimedByUserId))
+      .groupBy(partnerOfferVoucherCodes.offerId);
+    const poolMap = new Map<string, number>(poolCounts.map(p => [p.offerId, p.count]));
+
     return rows.map(o => ({
       id: o.id,
       title: o.title,
@@ -205,6 +231,8 @@ export async function insurerRoutes(app: FastifyInstance) {
       validUntil: o.validUntil?.toISOString() ?? null,
       membersOnly: o.membersOnly,
       benefitType: o.benefitType,
+      voucherDelivery: o.voucherDelivery,
+      availableCodesCount: o.voucherDelivery === 'code_pool' ? (poolMap.get(o.id) ?? 0) : undefined,
       voucherCode: o.voucherCode,
       partnerUrl: o.partnerUrl,
     }));
@@ -225,10 +253,13 @@ export async function insurerRoutes(app: FastifyInstance) {
       validUntil?: string;
       membersOnly?: boolean;
       benefitType?: BenefitType;
+      voucherDelivery?: 'code_pool' | 'email';
       voucherCode?: string;
       partnerUrl?: string;
+      voucherCodesText?: string;
+      voucherCodes?: string[];
     };
-    const { title, description, minBand, minMonths, valueLabel, validFrom, validUntil, membersOnly, benefitType, voucherCode, partnerUrl } = body;
+    const { title, description, minBand, minMonths, valueLabel, validFrom, validUntil, membersOnly, benefitType, voucherDelivery, voucherCode, partnerUrl } = body;
 
     if (!title || !description || minBand === undefined || !valueLabel) {
       return reply.status(400).send({ title: 'Pflichtfelder fehlen.' });
@@ -258,9 +289,24 @@ export async function insurerRoutes(app: FastifyInstance) {
       isDemo: false,
       membersOnly: membersOnly ?? true,
       benefitType: benefitType ?? 'payout',
+      voucherDelivery: voucherDelivery ?? (voucherCode ? 'code_pool' : 'email'),
       voucherCode: voucherCode?.trim() || null,
       partnerUrl: partnerUrl?.trim() || null,
     }).returning();
+
+    // Mass-import initial codes if provided
+    let importedCount = 0;
+    const initialCodes = [
+      ...(Array.isArray(body.voucherCodes) ? body.voucherCodes : []),
+      ...(typeof body.voucherCodesText === 'string' ? body.voucherCodesText.split(/[\n,;]+/) : []),
+    ].map(c => c.trim()).filter(Boolean);
+
+    if (initialCodes.length > 0) {
+      await db.insert(partnerOfferVoucherCodes).values(
+        initialCodes.map(code => ({ offerId: offer.id, code }))
+      );
+      importedCount = initialCodes.length;
+    }
 
     return reply.status(201).send({
       id: offer.id,
@@ -273,6 +319,8 @@ export async function insurerRoutes(app: FastifyInstance) {
       validUntil: offer.validUntil?.toISOString() ?? null,
       membersOnly: offer.membersOnly,
       benefitType: offer.benefitType,
+      voucherDelivery: offer.voucherDelivery,
+      availableCodesCount: importedCount,
       voucherCode: offer.voucherCode,
       partnerUrl: offer.partnerUrl,
     });
@@ -294,8 +342,11 @@ export async function insurerRoutes(app: FastifyInstance) {
       validUntil?: string | null;
       membersOnly?: boolean;
       benefitType?: BenefitType;
+      voucherDelivery?: 'code_pool' | 'email';
       voucherCode?: string | null;
       partnerUrl?: string | null;
+      voucherCodesText?: string;
+      voucherCodes?: string[];
     };
 
     if (body.minBand !== undefined && (body.minBand < 0 || body.minBand > 100)) {
@@ -323,9 +374,26 @@ export async function insurerRoutes(app: FastifyInstance) {
       ...(body.validUntil !== undefined && { validUntil: body.validUntil ? new Date(body.validUntil) : null }),
       ...(body.membersOnly !== undefined && { membersOnly: body.membersOnly }),
       ...(body.benefitType !== undefined && { benefitType: body.benefitType }),
+      ...(body.voucherDelivery !== undefined && { voucherDelivery: body.voucherDelivery }),
       ...(body.voucherCode !== undefined && { voucherCode: body.voucherCode ? body.voucherCode.trim() : null }),
       ...(body.partnerUrl !== undefined && { partnerUrl: body.partnerUrl ? body.partnerUrl.trim() : null }),
     }).where(eq(partnerOffers.id, id)).returning();
+
+    // Mass-import additional codes if provided
+    const newCodes = [
+      ...(Array.isArray(body.voucherCodes) ? body.voucherCodes : []),
+      ...(typeof body.voucherCodesText === 'string' ? body.voucherCodesText.split(/[\n,;]+/) : []),
+    ].map(c => c.trim()).filter(Boolean);
+
+    if (newCodes.length > 0) {
+      await db.insert(partnerOfferVoucherCodes).values(
+        newCodes.map(code => ({ offerId: updated.id, code }))
+      );
+    }
+
+    const [availableRow] = await db.select({ count: sql<number>`count(*)::int` })
+      .from(partnerOfferVoucherCodes)
+      .where(and(eq(partnerOfferVoucherCodes.offerId, updated.id), isNull(partnerOfferVoucherCodes.claimedByUserId)));
 
     return {
       id: updated.id,
@@ -338,8 +406,67 @@ export async function insurerRoutes(app: FastifyInstance) {
       validUntil: updated.validUntil?.toISOString() ?? null,
       membersOnly: updated.membersOnly,
       benefitType: updated.benefitType,
+      voucherDelivery: updated.voucherDelivery,
+      availableCodesCount: availableRow?.count ?? 0,
       voucherCode: updated.voucherCode,
       partnerUrl: updated.partnerUrl,
+    };
+  });
+
+  app.post('/insurer/offers/:id/voucher-codes', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const { id } = req.params as { id: string };
+    const [offer] = await db.select().from(partnerOffers)
+      .where(and(eq(partnerOffers.id, id), eq(partnerOffers.organizationId, user.organizationId)))
+      .limit(1);
+    if (!offer) return reply.status(404).send({ title: 'Angebot nicht gefunden.' });
+
+    const body = req.body as { codes?: string[]; rawText?: string };
+    const codesToInsert = [
+      ...(Array.isArray(body?.codes) ? body.codes : []),
+      ...(typeof body?.rawText === 'string' ? body.rawText.split(/[\n,;]+/) : []),
+    ].map(c => c.trim()).filter(Boolean);
+
+    if (codesToInsert.length === 0) {
+      return reply.status(400).send({ title: 'Keine gültigen Gutscheincodes angegeben.' });
+    }
+
+    await db.insert(partnerOfferVoucherCodes).values(
+      codesToInsert.map(code => ({ offerId: offer.id, code }))
+    );
+
+    const [availableRow] = await db.select({ count: sql<number>`count(*)::int` })
+      .from(partnerOfferVoucherCodes)
+      .where(and(eq(partnerOfferVoucherCodes.offerId, offer.id), isNull(partnerOfferVoucherCodes.claimedByUserId)));
+
+    return reply.status(201).send({
+      inserted: codesToInsert.length,
+      availableCodesCount: availableRow?.count ?? 0,
+    });
+  });
+
+  app.get('/insurer/offers/:id/voucher-codes', async (req, reply) => {
+    const user = await requireRole(req, reply, ['insurer_admin', 'insurer_staff']);
+    if (!user) return;
+    if (!user.organizationId) return reply.status(404).send({ title: 'Keine Organisation zugeordnet.' });
+
+    const { id } = req.params as { id: string };
+    const [offer] = await db.select().from(partnerOffers)
+      .where(and(eq(partnerOffers.id, id), eq(partnerOffers.organizationId, user.organizationId)))
+      .limit(1);
+    if (!offer) return reply.status(404).send({ title: 'Angebot nicht gefunden.' });
+
+    const rows = await db.select().from(partnerOfferVoucherCodes).where(eq(partnerOfferVoucherCodes.offerId, offer.id));
+    const available = rows.filter(r => !r.claimedByUserId).length;
+    const claimed = rows.filter(r => !!r.claimedByUserId).length;
+
+    return {
+      total: rows.length,
+      available,
+      claimed,
     };
   });
 
@@ -373,6 +500,8 @@ export async function insurerRoutes(app: FastifyInstance) {
       payoutMethod?: PayoutMethod;
       iban?: string;
       accountHolder?: string;
+      kvnr?: string;
+      contactEmail?: string;
     }) || {};
 
     const now = new Date();
@@ -404,7 +533,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       .where(and(
         eq(benefitClaims.userId, user.id),
         eq(benefitClaims.offerId, offerId),
-        inArray(benefitClaims.status, ['submitted', 'accepted']),
+        inArray(benefitClaims.status, ['submitted', 'processing', 'accepted']),
       ))
       .limit(1);
     if (existingActive) {
@@ -414,24 +543,61 @@ export async function insurerRoutes(app: FastifyInstance) {
     let chosenMethod: PayoutMethod = body.payoutMethod || (offer.benefitType === 'voucher' ? 'voucher' : offer.benefitType === 'certificate' ? 'self_submitted' : 'bank_transfer');
     let maskedIban: string | null = null;
     let accountHolder: string | null = null;
+    let contactEmail: string | null = null;
+    const kvnr: string | null = body.kvnr?.trim() || null;
     let rewardPayload: RewardPayload | null = null;
-    let claimStatus: 'submitted' | 'accepted' = 'submitted';
+    let claimStatus: BenefitClaimStatus = 'submitted';
     let decidedAt: Date | null = null;
 
     if (offer.benefitType === 'voucher' || chosenMethod === 'voucher') {
       chosenMethod = 'voucher';
-      claimStatus = 'accepted';
-      decidedAt = now;
-      const code = offer.voucherCode || `LONG-${offer.partnerName.replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`;
-      rewardPayload = {
-        voucherCode: code,
-        ...(offer.partnerUrl ? { partnerUrl: offer.partnerUrl } : {}),
-      };
+      if (offer.voucherDelivery === 'code_pool') {
+        const [availCode] = await db.select().from(partnerOfferVoucherCodes)
+          .where(and(
+            eq(partnerOfferVoucherCodes.offerId, offer.id),
+            isNull(partnerOfferVoucherCodes.claimedByUserId)
+          ))
+          .limit(1);
+
+        if (availCode) {
+          await db.update(partnerOfferVoucherCodes)
+            .set({ claimedByUserId: user.id, claimedAt: now })
+            .where(eq(partnerOfferVoucherCodes.id, availCode.id));
+          claimStatus = 'accepted';
+          decidedAt = now;
+          rewardPayload = {
+            voucherCode: availCode.code,
+            voucherDelivery: 'code_pool',
+            ...(offer.partnerUrl ? { partnerUrl: offer.partnerUrl } : {}),
+          };
+        } else if (offer.voucherCode) {
+          claimStatus = 'accepted';
+          decidedAt = now;
+          rewardPayload = {
+            voucherCode: offer.voucherCode,
+            voucherDelivery: 'code_pool',
+            ...(offer.partnerUrl ? { partnerUrl: offer.partnerUrl } : {}),
+          };
+        } else {
+          return reply.status(400).send({ title: 'Der Gutschein-Pool ist aktuell erschöpft. Bitte wende dich an die Krankenkasse.' });
+        }
+      } else {
+        contactEmail = body.contactEmail?.trim() || user.email;
+        claimStatus = 'submitted';
+        rewardPayload = {
+          voucherDelivery: 'email',
+          contactEmail,
+          ...(offer.partnerUrl ? { partnerUrl: offer.partnerUrl } : {}),
+        };
+      }
     } else if (offer.benefitType === 'certificate' || chosenMethod === 'self_submitted') {
       chosenMethod = 'self_submitted';
-      claimStatus = 'accepted';
-      decidedAt = now;
+      claimStatus = 'submitted';
+      rewardPayload = {
+        note: '§ 65a SGB V Nachweis eingereicht',
+      };
     } else {
+      claimStatus = 'submitted';
       if (chosenMethod === 'contribution_offset') {
         if (!offer.organizationId || user.organizationId !== offer.organizationId) {
           return reply.status(400).send({ title: 'Beitragsverrechnung ist nur für verifizierte Mitglieder dieser Krankenkasse verfügbar.' });
@@ -444,8 +610,6 @@ export async function insurerRoutes(app: FastifyInstance) {
           chosenMethod = 'bank_transfer';
           maskedIban = maskIban(body.iban);
           accountHolder = body.accountHolder?.trim() || user.displayName || user.email;
-        } else if (body.payoutMethod === 'bank_transfer') {
-          return reply.status(400).send({ title: 'Bitte eine gültige IBAN angeben.' });
         } else {
           if (offer.organizationId && user.organizationId === offer.organizationId) {
             chosenMethod = 'contribution_offset';
@@ -454,6 +618,9 @@ export async function insurerRoutes(app: FastifyInstance) {
           }
         }
       }
+      rewardPayload = {
+        ...(kvnr ? { note: `KVNR: ${kvnr}` } : {}),
+      };
     }
 
     const sampleData = await getVerifiedUserSamples(user.id);
@@ -497,6 +664,8 @@ export async function insurerRoutes(app: FastifyInstance) {
       payoutMethod: chosenMethod,
       payoutIbanMasked: maskedIban,
       payoutAccountHolder: accountHolder,
+      contactEmail,
+      kvnr,
       rewardPayload,
       decidedAt,
       selfSubmittedAt: chosenMethod === 'self_submitted' ? now : null,
@@ -509,6 +678,8 @@ export async function insurerRoutes(app: FastifyInstance) {
       submittedAt: claim.submittedAt.toISOString(),
       payoutMethod: claim.payoutMethod,
       payoutIbanMasked: claim.payoutIbanMasked,
+      contactEmail: claim.contactEmail,
+      kvnr: claim.kvnr,
       rewardPayload: claim.rewardPayload,
       shareTokenId: tokenId,
       verifyUrl: `/verify/${tokenId}`,
@@ -528,6 +699,8 @@ export async function insurerRoutes(app: FastifyInstance) {
       payoutMethod: benefitClaims.payoutMethod,
       payoutIbanMasked: benefitClaims.payoutIbanMasked,
       payoutAccountHolder: benefitClaims.payoutAccountHolder,
+      contactEmail: benefitClaims.contactEmail,
+      kvnr: benefitClaims.kvnr,
       rewardPayload: benefitClaims.rewardPayload,
       rejectionReason: benefitClaims.rejectionReason,
       selfSubmittedAt: benefitClaims.selfSubmittedAt,
@@ -540,6 +713,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       offerDescription: partnerOffers.description,
       offerValueLabel: partnerOffers.valueLabel,
       offerBenefitType: partnerOffers.benefitType,
+      offerVoucherDelivery: partnerOffers.voucherDelivery,
       offerPartnerUrl: partnerOffers.partnerUrl,
     }).from(benefitClaims)
       .innerJoin(partnerOffers, eq(benefitClaims.offerId, partnerOffers.id))
@@ -555,6 +729,8 @@ export async function insurerRoutes(app: FastifyInstance) {
       payoutMethod: r.payoutMethod,
       payoutIbanMasked: r.payoutIbanMasked,
       payoutAccountHolder: r.payoutAccountHolder,
+      contactEmail: r.contactEmail,
+      kvnr: r.kvnr,
       rewardPayload: r.rewardPayload,
       rejectionReason: r.rejectionReason,
       selfSubmittedAt: r.selfSubmittedAt?.toISOString() ?? null,
@@ -570,6 +746,7 @@ export async function insurerRoutes(app: FastifyInstance) {
         description: r.offerDescription,
         valueLabel: r.offerValueLabel,
         benefitType: r.offerBenefitType,
+        voucherDelivery: r.offerVoucherDelivery,
         partnerUrl: r.offerPartnerUrl,
       },
     }));
@@ -677,12 +854,16 @@ export async function insurerRoutes(app: FastifyInstance) {
       payoutMethod: benefitClaims.payoutMethod,
       payoutIbanMasked: benefitClaims.payoutIbanMasked,
       payoutAccountHolder: benefitClaims.payoutAccountHolder,
+      contactEmail: benefitClaims.contactEmail,
+      kvnr: benefitClaims.kvnr,
       rewardPayload: benefitClaims.rewardPayload,
       rejectionReason: benefitClaims.rejectionReason,
       submittedAt: benefitClaims.submittedAt,
       decidedAt: benefitClaims.decidedAt,
       shareTokenId: benefitClaims.shareTokenId,
       offerTitle: partnerOffers.title,
+      offerBenefitType: partnerOffers.benefitType,
+      offerVoucherDelivery: partnerOffers.voucherDelivery,
       userEmail: users.email,
       userDisplayName: users.displayName,
     }).from(benefitClaims)
@@ -699,11 +880,15 @@ export async function insurerRoutes(app: FastifyInstance) {
       payoutMethod: r.payoutMethod,
       payoutIbanMasked: r.payoutIbanMasked,
       payoutAccountHolder: r.payoutAccountHolder,
+      contactEmail: r.contactEmail,
+      kvnr: r.kvnr,
       rewardPayload: r.rewardPayload,
       rejectionReason: r.rejectionReason,
       submittedAt: r.submittedAt.toISOString(),
       decidedAt: r.decidedAt?.toISOString() ?? null,
       offerTitle: r.offerTitle,
+      benefitType: r.offerBenefitType,
+      voucherDelivery: r.offerVoucherDelivery,
       userEmail: r.userEmail,
       userDisplayName: r.userDisplayName,
       verifyUrl: `/verify/${r.shareTokenId}`,
@@ -717,12 +902,12 @@ export async function insurerRoutes(app: FastifyInstance) {
 
     const { id } = req.params as { id: string };
     const body = req.body as {
-      decision?: 'accepted' | 'rejected';
+      decision?: 'processing' | 'accepted' | 'rejected';
       note?: string;
       transactionRef?: string;
       rejectionReason?: string;
     };
-    if (body.decision !== 'accepted' && body.decision !== 'rejected') {
+    if (body.decision !== 'processing' && body.decision !== 'accepted' && body.decision !== 'rejected') {
       return reply.status(400).send({ title: 'Ungültige Entscheidung.' });
     }
 
@@ -730,7 +915,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       .where(and(eq(benefitClaims.id, id), eq(benefitClaims.organizationId, user.organizationId)))
       .limit(1);
     if (!existing) return reply.status(404).send({ title: 'Einreichung nicht gefunden.' });
-    if (existing.status !== 'submitted') {
+    if (existing.status === 'accepted' || existing.status === 'rejected') {
       return reply.status(409).send({ title: 'Über diese Einreichung wurde bereits entschieden.' });
     }
 
@@ -740,9 +925,10 @@ export async function insurerRoutes(app: FastifyInstance) {
       ...(body.note ? { note: body.note.trim() } : {}),
     };
 
+    const isFinal = body.decision === 'accepted' || body.decision === 'rejected';
     const [updated] = await db.update(benefitClaims).set({
       status: body.decision,
-      decidedAt: new Date(),
+      decidedAt: isFinal ? new Date() : existing.decidedAt,
       decidedBy: user.id,
       rejectionReason: body.decision === 'rejected' ? (body.rejectionReason?.trim() || null) : null,
       rewardPayload: Object.keys(rewardPayload).length > 0 ? rewardPayload : null,

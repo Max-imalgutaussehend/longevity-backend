@@ -390,4 +390,156 @@ describe.skipIf(!HAS_DB)('Issue #130: End-to-End Flow für Krankenkassen-Vorteil
     expect(patched.selfSubmittedAt).toBeDefined();
     expect(patched.reminderAt).toBeDefined();
   });
+
+  it('allows mass import of voucher codes and atomic claiming from code pool', async () => {
+    // 1. Create a code-pool voucher offer
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/insurer/offers',
+      headers: { cookie: insurerCookie, 'x-csrf-token': insurerCsrfToken },
+      payload: {
+        title: 'Gym-Monatsabo via Code-Pool',
+        description: 'Exklusiver Zugang für fleißige Mitglieder',
+        minBand: 0,
+        minMonths: 0,
+        valueLabel: '1 Monat gratis',
+        membersOnly: false,
+        benefitType: 'voucher',
+        voucherDelivery: 'code_pool',
+      },
+    });
+    expect(createRes.statusCode).toBe(201);
+    const poolOffer = JSON.parse(createRes.payload);
+
+    // 2. Mass import codes
+    const importRes = await app.inject({
+      method: 'POST',
+      url: `/api/insurer/offers/${poolOffer.id}/voucher-codes`,
+      headers: { cookie: insurerCookie, 'x-csrf-token': insurerCsrfToken },
+      payload: {
+        codes: ['POOL-CODE-AAA', 'POOL-CODE-BBB', 'POOL-CODE-CCC'],
+      },
+    });
+    expect(importRes.statusCode).toBe(201);
+    const importBody = JSON.parse(importRes.payload);
+    expect(importBody.inserted).toBe(3);
+    expect(importBody.availableCodesCount).toBe(3);
+
+    // 3. Check pool stats
+    const statsRes = await app.inject({
+      method: 'GET',
+      url: `/api/insurer/offers/${poolOffer.id}/voucher-codes`,
+      headers: { cookie: insurerCookie, 'x-csrf-token': insurerCsrfToken },
+    });
+    expect(statsRes.statusCode).toBe(200);
+    const stats = JSON.parse(statsRes.payload);
+    expect(stats.total).toBe(3);
+    expect(stats.available).toBe(3);
+    expect(stats.claimed).toBe(0);
+
+    // 4. User claims an item from pool
+    const claimRes = await app.inject({
+      method: 'POST',
+      url: `/api/offers/${poolOffer.id}/claim`,
+      headers: { cookie: memberCookie, 'x-csrf-token': memberCsrfToken },
+      payload: {},
+    });
+    expect(claimRes.statusCode).toBe(201);
+    const claim = JSON.parse(claimRes.payload);
+    expect(claim.status).toBe('accepted');
+    expect(claim.rewardPayload?.voucherCode).toBe('POOL-CODE-AAA');
+    expect(claim.rewardPayload?.voucherDelivery).toBe('code_pool');
+
+    // 5. Verify available count decremented
+    const statsAfter = await app.inject({
+      method: 'GET',
+      url: `/api/insurer/offers/${poolOffer.id}/voucher-codes`,
+      headers: { cookie: insurerCookie, 'x-csrf-token': insurerCsrfToken },
+    });
+    const statsAfterJson = JSON.parse(statsAfter.payload);
+    expect(statsAfterJson.available).toBe(2);
+    expect(statsAfterJson.claimed).toBe(1);
+  });
+
+  it('supports partner email vouchers with contactEmail and multi-stage insurer processing', async () => {
+    // 1. Create an email delivery voucher offer
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/insurer/offers',
+      headers: { cookie: insurerCookie, 'x-csrf-token': insurerCsrfToken },
+      payload: {
+        title: 'Partner HelloFresh Kochbox',
+        description: 'Vom Partner direkt per Mail versendet',
+        minBand: 0,
+        minMonths: 0,
+        valueLabel: '40 € Kochbox',
+        membersOnly: false,
+        benefitType: 'voucher',
+        voucherDelivery: 'email',
+      },
+    });
+    expect(createRes.statusCode).toBe(201);
+    const emailOffer = JSON.parse(createRes.payload);
+
+    // 2. User claims with contactEmail
+    const claimRes = await app.inject({
+      method: 'POST',
+      url: `/api/offers/${emailOffer.id}/claim`,
+      headers: { cookie: memberCookie, 'x-csrf-token': memberCsrfToken },
+      payload: {
+        contactEmail: 'gutschein-empfaenger@beispiel.de',
+      },
+    });
+    expect(claimRes.statusCode).toBe(201);
+    const claim = JSON.parse(claimRes.payload);
+    expect(claim.status).toBe('submitted');
+    expect(claim.contactEmail).toBe('gutschein-empfaenger@beispiel.de');
+    expect(claim.rewardPayload?.voucherDelivery).toBe('email');
+
+    // 3. Insurer marks status as 'processing'
+    const procRes = await app.inject({
+      method: 'POST',
+      url: `/api/insurer/claims/${claim.id}/decide`,
+      headers: { cookie: insurerCookie, 'x-csrf-token': insurerCsrfToken },
+      payload: {
+        decision: 'processing',
+        note: 'Gutscheincode bei Partner angefragt',
+      },
+    });
+    expect(procRes.statusCode).toBe(200);
+    const procBody = JSON.parse(procRes.payload);
+    expect(procBody.status).toBe('processing');
+
+    // 4. Insurer marks status as 'accepted'
+    const acceptRes = await app.inject({
+      method: 'POST',
+      url: `/api/insurer/claims/${claim.id}/decide`,
+      headers: { cookie: insurerCookie, 'x-csrf-token': insurerCsrfToken },
+      payload: {
+        decision: 'accepted',
+        note: 'Code per E-Mail an gutschein-empfaenger@beispiel.de versendet',
+      },
+    });
+    expect(acceptRes.statusCode).toBe(200);
+    const acceptBody = JSON.parse(acceptRes.payload);
+    expect(acceptBody.status).toBe('accepted');
+  });
+
+  it('allows claiming payout with KVNR without forcing IBAN input', async () => {
+    // Member claims payout without entering IBAN, providing KVNR
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/offers/${publicPayoutOfferId}/claim`,
+      headers: { cookie: memberCookie, 'x-csrf-token': memberCsrfToken },
+      payload: {
+        payoutMethod: 'bank_transfer',
+        kvnr: 'T123456789',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const claim = JSON.parse(res.payload);
+    expect(claim.status).toBe('submitted');
+    expect(claim.kvnr).toBe('T123456789');
+    expect(claim.payoutIbanMasked).toBeNull();
+  });
 });

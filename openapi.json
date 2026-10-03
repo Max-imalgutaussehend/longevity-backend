@@ -361,6 +361,16 @@
               "certificate"
             ]
           },
+          "voucherDelivery": {
+            "type": "string",
+            "enum": [
+              "code_pool",
+              "email"
+            ]
+          },
+          "availableCodesCount": {
+            "type": "integer"
+          },
           "voucherCode": {
             "type": [
               "string",
@@ -401,6 +411,7 @@
             ],
             "enum": [
               "submitted",
+              "processing",
               "accepted",
               "rejected",
               null
@@ -420,6 +431,18 @@
             ]
           },
           "payoutIbanMasked": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contactEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kvnr": {
             "type": [
               "string",
               "null"
@@ -455,6 +478,7 @@
             "type": "string",
             "enum": [
               "submitted",
+              "processing",
               "accepted",
               "rejected"
             ]
@@ -470,6 +494,18 @@
             ]
           },
           "payoutIbanMasked": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contactEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kvnr": {
             "type": [
               "string",
               "null"
@@ -516,6 +552,7 @@
             "type": "string",
             "enum": [
               "submitted",
+              "processing",
               "accepted",
               "rejected"
             ]
@@ -539,6 +576,18 @@
             ]
           },
           "payoutAccountHolder": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contactEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kvnr": {
             "type": [
               "string",
               "null"
@@ -625,6 +674,13 @@
                   "payout",
                   "voucher",
                   "certificate"
+                ]
+              },
+              "voucherDelivery": {
+                "type": "string",
+                "enum": [
+                  "code_pool",
+                  "email"
                 ]
               },
               "partnerUrl": {
@@ -747,6 +803,7 @@
             "type": "string",
             "enum": [
               "submitted",
+              "processing",
               "accepted",
               "rejected"
             ]
@@ -773,6 +830,33 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "contactEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kvnr": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "benefitType": {
+            "type": "string",
+            "enum": [
+              "payout",
+              "voucher",
+              "certificate"
+            ]
+          },
+          "voucherDelivery": {
+            "type": "string",
+            "enum": [
+              "code_pool",
+              "email"
             ]
           },
           "rewardPayload": {
@@ -1576,6 +1660,13 @@
                       "certificate"
                     ]
                   },
+                  "voucherDelivery": {
+                    "type": "string",
+                    "enum": [
+                      "code_pool",
+                      "email"
+                    ]
+                  },
                   "voucherCode": {
                     "type": [
                       "string",
@@ -1677,6 +1768,13 @@
                       "certificate"
                     ]
                   },
+                  "voucherDelivery": {
+                    "type": "string",
+                    "enum": [
+                      "code_pool",
+                      "email"
+                    ]
+                  },
                   "voucherCode": {
                     "type": [
                       "string",
@@ -1740,6 +1838,88 @@
           },
           "404": {
             "description": "No organization assigned"
+          }
+        }
+      }
+    },
+    "/insurer/offers/{id}/voucher-codes": {
+      "post": {
+        "operationId": "importVoucherCodes",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "Batch import voucher codes for an offer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "codes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "rawText": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Inserted"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not an insurer role"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getVoucherCodesStats",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "Get voucher pool statistics for an offer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Voucher code stats"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not an insurer role"
           }
         }
       }
@@ -3575,6 +3755,7 @@
                   "decision": {
                     "type": "string",
                     "enum": [
+                      "processing",
                       "accepted",
                       "rejected"
                     ]

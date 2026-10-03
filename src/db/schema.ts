@@ -144,11 +144,24 @@ export const partnerOffers = pgTable('partner_offers', {
   // which are always visible to everyone regardless of this flag.
   membersOnly: boolean('members_only').notNull().default(true),
   benefitType: text('benefit_type').$type<BenefitType>().notNull().default('payout'),
+  voucherDelivery: text('voucher_delivery').$type<'code_pool' | 'email'>().notNull().default('email'),
   voucherCode: text('voucher_code'),
   partnerUrl: text('partner_url'),
 }, (t) => ({ orgIdx: index().on(t.organizationId) }));
 
-export const BENEFIT_CLAIM_STATUSES = ['submitted', 'accepted', 'rejected'] as const;
+export const partnerOfferVoucherCodes = pgTable('partner_offer_voucher_codes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  offerId: uuid('offer_id').notNull().references(() => partnerOffers.id, { onDelete: 'cascade' }),
+  code: text('code').notNull(),
+  claimedByUserId: uuid('claimed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  offerIdx: index().on(t.offerId),
+  claimedIdx: index().on(t.claimedByUserId),
+}));
+
+export const BENEFIT_CLAIM_STATUSES = ['submitted', 'processing', 'accepted', 'rejected'] as const;
 export type BenefitClaimStatus = typeof BENEFIT_CLAIM_STATUSES[number];
 
 export const PAYOUT_METHODS = ['bank_transfer', 'contribution_offset', 'voucher', 'self_submitted'] as const;
@@ -156,6 +169,8 @@ export type PayoutMethod = typeof PAYOUT_METHODS[number];
 
 export interface RewardPayload {
   voucherCode?: string;
+  voucherDelivery?: 'code_pool' | 'email';
+  contactEmail?: string;
   transactionRef?: string;
   note?: string;
   partnerUrl?: string;
@@ -178,6 +193,8 @@ export const benefitClaims = pgTable('benefit_claims', {
   payoutMethod: text('payout_method').$type<PayoutMethod>().default('bank_transfer'),
   payoutIbanMasked: text('payout_iban_masked'),
   payoutAccountHolder: text('payout_account_holder'),
+  contactEmail: text('contact_email'),
+  kvnr: text('kvnr'),
   rewardPayload: jsonb('reward_payload').$type<RewardPayload>(),
   rejectionReason: text('rejection_reason'),
   selfSubmittedAt: timestamp('self_submitted_at', { withTimezone: true }),
