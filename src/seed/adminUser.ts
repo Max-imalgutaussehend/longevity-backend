@@ -11,7 +11,13 @@ async function run() {
 
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, ADMIN_EMAIL)).limit(1);
   if (existing.length > 0) {
-    console.log('Admin user already exists, skipping.');
+    const passwordHash = await hashPassword(ADMIN_PASSWORD);
+    await db.update(users).set({
+      passwordHash,
+      role: 'platform_admin',
+      emailVerifiedAt: new Date(),
+    }).where(eq(users.id, existing[0].id));
+    console.log(`Admin user already exists, updated password to ${ADMIN_PASSWORD}.`);
     process.exit(0);
   }
 

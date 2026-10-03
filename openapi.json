@@ -871,6 +871,13 @@
               "null"
             ]
           },
+          "selfSubmittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "submittedAt": {
             "type": "string",
             "format": "date-time"

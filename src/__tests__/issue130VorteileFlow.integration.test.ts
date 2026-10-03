@@ -374,6 +374,17 @@ describe.skipIf(!HAS_DB)('Issue #130: End-to-End Flow für Krankenkassen-Vorteil
     });
     expect(certClaimRes.statusCode).toBe(201);
     const certClaim = JSON.parse(certClaimRes.payload);
+    // Certificate is immediately issued and valid (status: accepted)
+    expect(certClaim.status).toBe('accepted');
+
+    // Attempting to decide on a self-submitted PDF certificate in insurer portal must be rejected (400)
+    const decideRes = await app.inject({
+      method: 'POST',
+      url: `/api/insurer/claims/${certClaim.id}/decide`,
+      headers: { cookie: insurerCookie, 'x-csrf-token': insurerCsrfToken },
+      payload: { decision: 'accepted' },
+    });
+    expect(decideRes.statusCode).toBe(400);
 
     // Update with 14-day reminder
     const patchRes = await app.inject({
@@ -389,6 +400,19 @@ describe.skipIf(!HAS_DB)('Issue #130: End-to-End Flow für Krankenkassen-Vorteil
     const patched = JSON.parse(patchRes.payload);
     expect(patched.selfSubmittedAt).toBeDefined();
     expect(patched.reminderAt).toBeDefined();
+
+    // Insurer can view the issued certificate and selfSubmittedAt in audit list
+    const insurerListRes = await app.inject({
+      method: 'GET',
+      url: '/api/insurer/claims',
+      headers: { cookie: insurerCookie, 'x-csrf-token': insurerCsrfToken },
+    });
+    expect(insurerListRes.statusCode).toBe(200);
+    const insurerClaims = JSON.parse(insurerListRes.payload);
+    const foundCert = insurerClaims.find((c: { id: string }) => c.id === certClaim.id);
+    expect(foundCert).toBeDefined();
+    expect(foundCert.payoutMethod).toBe('self_submitted');
+    expect(foundCert.selfSubmittedAt).toBeDefined();
   });
 
   it('allows mass import of voucher codes and atomic claiming from code pool', async () => {

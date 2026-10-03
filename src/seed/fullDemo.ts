@@ -45,6 +45,8 @@ export async function run() {
   const now = new Date();
   const defaultPassword = 'demo-longevity-2026';
   const sharedPasswordHash = await hashPassword(defaultPassword);
+  const insurerPasswordHash = await hashPassword('insurer-longevity-2026');
+  const adminPasswordHash = await hashPassword('admin-longevity-2026');
 
   // =========================================================================
   // 1. KRANKENKASSEN (ORGANISATIONS)
@@ -362,6 +364,7 @@ export async function run() {
       orgId: null,
       birthDate: '1990-01-01',
       sex: 'm',
+      passwordHash: adminPasswordHash,
     },
     {
       email: 'tk-admin@longevity.app',
@@ -370,6 +373,7 @@ export async function run() {
       orgId: tkId,
       birthDate: '1985-04-12',
       sex: 'm',
+      passwordHash: sharedPasswordHash,
     },
     {
       email: 'barmer-admin@longevity.app',
@@ -378,6 +382,7 @@ export async function run() {
       orgId: barmerId,
       birthDate: '1988-09-23',
       sex: 'f',
+      passwordHash: sharedPasswordHash,
     },
     {
       email: 'aok-admin@longevity.app',
@@ -386,6 +391,7 @@ export async function run() {
       orgId: aokId,
       birthDate: '1982-12-05',
       sex: 'f',
+      passwordHash: sharedPasswordHash,
     },
     {
       email: 'ottonova-admin@longevity.app',
@@ -394,6 +400,7 @@ export async function run() {
       orgId: ottonovaId,
       birthDate: '1991-07-19',
       sex: 'm',
+      passwordHash: sharedPasswordHash,
     },
     {
       email: 'insurer-demo@longevity.app',
@@ -402,6 +409,7 @@ export async function run() {
       orgId: demoOrgId,
       birthDate: '1985-06-01',
       sex: 'f',
+      passwordHash: insurerPasswordHash,
     },
   ];
 
@@ -412,11 +420,13 @@ export async function run() {
       .where(eq(users.email, staff.email))
       .limit(1);
 
+    const userPasswordHash = staff.passwordHash ?? sharedPasswordHash;
+
     if (existing.length > 0) {
       await db
         .update(users)
         .set({
-          passwordHash: sharedPasswordHash,
+          passwordHash: userPasswordHash,
           displayName: staff.displayName,
           role: staff.role,
           organizationId: staff.orgId,
@@ -426,7 +436,7 @@ export async function run() {
     } else {
       await db.insert(users).values({
         email: staff.email,
-        passwordHash: sharedPasswordHash,
+        passwordHash: userPasswordHash,
         displayName: staff.displayName,
         role: staff.role,
         organizationId: staff.orgId,
@@ -841,7 +851,11 @@ export async function run() {
 
   console.log('\n=============================================================');
   console.log('🎉 Alle Testdaten wurden erfolgreich eingespielt!');
-  console.log('Standard-Passwort für alle Accounts: demo-longevity-2026');
+  console.log('Zugangsdaten:');
+  console.log('  • Nutzer:         demo@longevity.app / demo-longevity-2026');
+  console.log('  • Insurer-Admin:  insurer-demo@longevity.app / insurer-longevity-2026');
+  console.log('  • Platform-Admin: admin@longevity.app / admin-longevity-2026');
+  console.log('  • Weitere Kassen: <kasse>-admin@longevity.app / demo-longevity-2026');
   console.log('=============================================================');
   return true;
 }

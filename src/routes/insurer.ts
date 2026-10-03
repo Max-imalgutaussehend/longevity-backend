@@ -592,9 +592,10 @@ export async function insurerRoutes(app: FastifyInstance) {
       }
     } else if (offer.benefitType === 'certificate' || chosenMethod === 'self_submitted') {
       chosenMethod = 'self_submitted';
-      claimStatus = 'submitted';
+      claimStatus = 'accepted';
+      decidedAt = now;
       rewardPayload = {
-        note: '§ 65a SGB V Nachweis eingereicht',
+        note: '§ 65a SGB V Nachweis ausgestellt',
       };
     } else {
       claimStatus = 'submitted';
@@ -668,8 +669,8 @@ export async function insurerRoutes(app: FastifyInstance) {
       kvnr,
       rewardPayload,
       decidedAt,
-      selfSubmittedAt: chosenMethod === 'self_submitted' ? now : null,
-      reminderAt: chosenMethod === 'self_submitted' ? new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000) : null,
+      selfSubmittedAt: null,
+      reminderAt: null,
     }).returning();
 
     return reply.status(201).send({
@@ -858,6 +859,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       kvnr: benefitClaims.kvnr,
       rewardPayload: benefitClaims.rewardPayload,
       rejectionReason: benefitClaims.rejectionReason,
+      selfSubmittedAt: benefitClaims.selfSubmittedAt,
       submittedAt: benefitClaims.submittedAt,
       decidedAt: benefitClaims.decidedAt,
       shareTokenId: benefitClaims.shareTokenId,
@@ -884,6 +886,7 @@ export async function insurerRoutes(app: FastifyInstance) {
       kvnr: r.kvnr,
       rewardPayload: r.rewardPayload,
       rejectionReason: r.rejectionReason,
+      selfSubmittedAt: r.selfSubmittedAt?.toISOString() ?? null,
       submittedAt: r.submittedAt.toISOString(),
       decidedAt: r.decidedAt?.toISOString() ?? null,
       offerTitle: r.offerTitle,
@@ -915,6 +918,11 @@ export async function insurerRoutes(app: FastifyInstance) {
       .where(and(eq(benefitClaims.id, id), eq(benefitClaims.organizationId, user.organizationId)))
       .limit(1);
     if (!existing) return reply.status(404).send({ title: 'Einreichung nicht gefunden.' });
+    if (existing.payoutMethod === 'self_submitted') {
+      return reply.status(400).send({
+        title: 'PDF-Nachweise werden durch das Mitglied direkt bei der Krankenkasse eingereicht und bedürfen keiner Portal-Entscheidung.',
+      });
+    }
     if (existing.status === 'accepted' || existing.status === 'rejected') {
       return reply.status(409).send({ title: 'Über diese Einreichung wurde bereits entschieden.' });
     }

@@ -798,6 +798,7 @@ const schemas: Record<string, unknown> = {
       voucherDelivery: { type: 'string', enum: ['code_pool', 'email'] },
       rewardPayload: { type: ['object', 'null'] },
       rejectionReason: { type: ['string', 'null'] },
+      selfSubmittedAt: { type: ['string', 'null'], format: 'date-time' },
       submittedAt: { type: 'string', format: 'date-time' },
       decidedAt: { type: ['string', 'null'], format: 'date-time' },
       offerTitle: { type: 'string' },
