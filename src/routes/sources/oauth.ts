@@ -6,9 +6,9 @@ import { env } from '../../env.js';
 import { exchangeCodeForToken } from '../../lib/oauthTokens.js';
 import { oauthProviders, providerToSourceKind } from '../../lib/oauthProviders.js';
 import { signOAuthState, verifyOAuthState } from '../../lib/oauthState.js';
-import { fetchGoogleFitSamples } from '../../adapters/googleFit.js';
-import { requireUser, upsertGoogleFitSamples, invalidateTodaySnapshot } from '../helpers.js';
+import { requireUser, invalidateTodaySnapshot } from '../helpers.js';
 import { buildFrontendUrl } from '../../lib/urls.js';
+import { syncSingleSource } from './sync.js';
 import '../../types.js';
 
 export async function sourcesOAuthRoutes(app: FastifyInstance) {
@@ -113,16 +113,12 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
       }).where(eq(sources.id, src.id));
     }
 
-    // Auto-sync initial samples for Google Fit / Google Health
-    if (sourceKind === 'google_fit') {
-      try {
-        const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
-        await upsertGoogleFitSamples(userId, src.id, parsedSamples);
-        await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
-        await invalidateTodaySnapshot(userId);
-      } catch (err) {
-        req.log.warn(err, 'Initial Google sync after OAuth callback failed');
-      }
+    // Auto-sync initial samples for newly connected source
+    try {
+      await syncSingleSource(userId, src, req.log);
+      await invalidateTodaySnapshot(userId);
+    } catch (err) {
+      req.log.warn(err, `Initial sync after OAuth callback for ${provider} failed`);
     }
 
     const acceptsHtml = req.headers.accept?.includes('text/html');
@@ -193,9 +189,7 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
     }
 
     try {
-      const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
-      await upsertGoogleFitSamples(userId, src.id, parsedSamples);
-      await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
+      await syncSingleSource(userId, src, req.log);
       await invalidateTodaySnapshot(userId);
     } catch (err) {
       req.log.warn(err, 'Initial Google sync after OAuth callback failed');
@@ -277,14 +271,12 @@ export async function sourcesOAuthRoutes(app: FastifyInstance) {
     }
 
     let inserted = 0;
-    if (sourceKind === 'google_fit') {
-      try {
-        const parsedSamples = await fetchGoogleFitSamples(credentials.accessToken);
-        inserted = await upsertGoogleFitSamples(user.id, src.id, parsedSamples);
-        await db.update(sources).set({ lastSyncAt: new Date(), syncStatus: 'ok', syncError: null }).where(eq(sources.id, src.id));
-      } catch (err) {
-        req.log.warn(err, 'Initial Google sync after manual exchange failed');
-      }
+    try {
+      const syncRes = await syncSingleSource(user.id, src, req.log);
+      inserted = syncRes.inserted;
+      await invalidateTodaySnapshot(user.id);
+    } catch (err) {
+      req.log.warn(err, `Initial sync after manual exchange for ${provider} failed`);
     }
 
     return reply.status(200).send({ ok: true, sourceId: src.id, inserted });
