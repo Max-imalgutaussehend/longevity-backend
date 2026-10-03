@@ -353,6 +353,57 @@
           "membersOnly": {
             "type": "boolean"
           },
+          "benefitType": {
+            "type": "string",
+            "enum": [
+              "payout",
+              "voucher",
+              "certificate"
+            ]
+          },
+          "voucherDelivery": {
+            "type": "string",
+            "enum": [
+              "code_pool",
+              "email"
+            ]
+          },
+          "availableCodesCount": {
+            "type": "integer"
+          },
+          "voucherCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "partnerUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "validFrom": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "validUntil": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "claimId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
           "claimStatus": {
             "type": [
               "string",
@@ -360,6 +411,7 @@
             ],
             "enum": [
               "submitted",
+              "processing",
               "accepted",
               "rejected",
               null
@@ -371,6 +423,42 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "payoutMethod": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payoutIbanMasked": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contactEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kvnr": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rewardPayload": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "rejectionReason": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -390,12 +478,306 @@
             "type": "string",
             "enum": [
               "submitted",
+              "processing",
               "accepted",
               "rejected"
             ]
           },
           "submittedAt": {
             "type": "string",
+            "format": "date-time"
+          },
+          "payoutMethod": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payoutIbanMasked": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contactEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kvnr": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rewardPayload": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "shareTokenId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verifyUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "UserClaim": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "submittedAt",
+          "offer"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitted",
+              "processing",
+              "accepted",
+              "rejected"
+            ]
+          },
+          "bandLow": {
+            "type": "integer"
+          },
+          "bandHigh": {
+            "type": "integer"
+          },
+          "payoutMethod": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payoutIbanMasked": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payoutAccountHolder": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contactEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kvnr": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rewardPayload": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "rejectionReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "selfSubmittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reminderAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "shareTokenId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verifyUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "offer": {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "partnerName",
+              "valueLabel",
+              "benefitType"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "title": {
+                "type": "string"
+              },
+              "partnerName": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "valueLabel": {
+                "type": "string"
+              },
+              "benefitType": {
+                "type": "string",
+                "enum": [
+                  "payout",
+                  "voucher",
+                  "certificate"
+                ]
+              },
+              "voucherDelivery": {
+                "type": "string",
+                "enum": [
+                  "code_pool",
+                  "email"
+                ]
+              },
+              "partnerUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "ClaimReceipt": {
+        "type": "object",
+        "required": [
+          "receiptNumber",
+          "claimId",
+          "status",
+          "userDisplayName",
+          "userEmail",
+          "offerTitle",
+          "partnerName",
+          "valueLabel",
+          "submittedAt"
+        ],
+        "properties": {
+          "receiptNumber": {
+            "type": "string"
+          },
+          "claimId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "userDisplayName": {
+            "type": "string"
+          },
+          "userEmail": {
+            "type": "string",
+            "format": "email"
+          },
+          "offerTitle": {
+            "type": "string"
+          },
+          "partnerName": {
+            "type": "string"
+          },
+          "valueLabel": {
+            "type": "string"
+          },
+          "payoutMethod": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payoutIbanMasked": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payoutAccountHolder": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "transactionRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "voucherCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           }
         }
@@ -421,6 +803,7 @@
             "type": "string",
             "enum": [
               "submitted",
+              "processing",
               "accepted",
               "rejected"
             ]
@@ -430,6 +813,70 @@
           },
           "bandHigh": {
             "type": "integer"
+          },
+          "payoutMethod": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payoutIbanMasked": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payoutAccountHolder": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contactEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kvnr": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "benefitType": {
+            "type": "string",
+            "enum": [
+              "payout",
+              "voucher",
+              "certificate"
+            ]
+          },
+          "voucherDelivery": {
+            "type": "string",
+            "enum": [
+              "code_pool",
+              "email"
+            ]
+          },
+          "rewardPayload": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "rejectionReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "selfSubmittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           },
           "submittedAt": {
             "type": "string",
@@ -1211,6 +1658,33 @@
                   "membersOnly": {
                     "type": "boolean",
                     "description": "Exclusive to the organization's own verified members (default true) vs. visible to all users."
+                  },
+                  "benefitType": {
+                    "type": "string",
+                    "enum": [
+                      "payout",
+                      "voucher",
+                      "certificate"
+                    ]
+                  },
+                  "voucherDelivery": {
+                    "type": "string",
+                    "enum": [
+                      "code_pool",
+                      "email"
+                    ]
+                  },
+                  "voucherCode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "partnerUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 }
               }
@@ -1292,6 +1766,33 @@
                   },
                   "membersOnly": {
                     "type": "boolean"
+                  },
+                  "benefitType": {
+                    "type": "string",
+                    "enum": [
+                      "payout",
+                      "voucher",
+                      "certificate"
+                    ]
+                  },
+                  "voucherDelivery": {
+                    "type": "string",
+                    "enum": [
+                      "code_pool",
+                      "email"
+                    ]
+                  },
+                  "voucherCode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "partnerUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 }
               }
@@ -1344,6 +1845,88 @@
           },
           "404": {
             "description": "No organization assigned"
+          }
+        }
+      }
+    },
+    "/insurer/offers/{id}/voucher-codes": {
+      "post": {
+        "operationId": "importVoucherCodes",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "Batch import voucher codes for an offer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "codes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "rawText": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Inserted"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not an insurer role"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getVoucherCodesStats",
+        "tags": [
+          "Insurer"
+        ],
+        "summary": "Get voucher pool statistics for an offer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Voucher code stats"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Not an insurer role"
           }
         }
       }
@@ -2935,7 +3518,7 @@
         "tags": [
           "Offers"
         ],
-        "summary": "Submit a qualified offer directly to its issuing insurer",
+        "summary": "Submit a qualified offer directly to its issuing insurer or claim reward",
         "parameters": [
           {
             "name": "id",
@@ -2946,6 +3529,32 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "payoutMethod": {
+                    "type": "string",
+                    "enum": [
+                      "bank_transfer",
+                      "contribution_offset",
+                      "voucher",
+                      "self_submitted"
+                    ]
+                  },
+                  "iban": {
+                    "type": "string"
+                  },
+                  "accountHolder": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "Created",
@@ -2963,11 +3572,129 @@
           "401": {
             "description": "Unauthenticated"
           },
+          "403": {
+            "description": "Members-only offer or invalid organization"
+          },
           "404": {
             "description": "Offer not found"
           },
           "409": {
             "description": "An active (submitted or accepted) claim already exists for this offer"
+          }
+        }
+      }
+    },
+    "/me/claims": {
+      "get": {
+        "operationId": "listMyClaims",
+        "tags": [
+          "Offers"
+        ],
+        "summary": "List all benefit claims for the authenticated user",
+        "responses": {
+          "200": {
+            "description": "UserClaim[]",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserClaim"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/me/claims/{id}": {
+      "patch": {
+        "operationId": "updateMyClaim",
+        "tags": [
+          "Offers"
+        ],
+        "summary": "Update claim submission status or reminders",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "selfSubmitted": {
+                    "type": "boolean"
+                  },
+                  "reminderDays": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/claims/{id}/receipt": {
+      "get": {
+        "operationId": "getClaimReceipt",
+        "tags": [
+          "Offers"
+        ],
+        "summary": "Get official payment receipt for an accepted claim",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ClaimReceipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimReceipt"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
           }
         }
       }
@@ -3035,9 +3762,19 @@
                   "decision": {
                     "type": "string",
                     "enum": [
+                      "processing",
                       "accepted",
                       "rejected"
                     ]
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "transactionRef": {
+                    "type": "string"
+                  },
+                  "rejectionReason": {
+                    "type": "string"
                   }
                 }
               }

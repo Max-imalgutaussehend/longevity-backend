@@ -45,6 +45,8 @@ export async function run() {
   const now = new Date();
   const defaultPassword = 'demo-longevity-2026';
   const sharedPasswordHash = await hashPassword(defaultPassword);
+  const insurerPasswordHash = await hashPassword('insurer-longevity-2026');
+  const adminPasswordHash = await hashPassword('admin-longevity-2026');
 
   // =========================================================================
   // 1. KRANKENKASSEN (ORGANISATIONS)
@@ -170,6 +172,11 @@ export async function run() {
       minBand: 0,
       minMonths: null,
       valueLabel: '7 Tage gratis',
+      benefitType: 'voucher' as const,
+      voucherDelivery: 'code_pool' as const,
+      voucherCode: 'LONGEVITY-USC-7D',
+      partnerUrl: 'https://urbansportsclub.com',
+      membersOnly: false,
       sortOrder: 1,
     },
     {
@@ -180,6 +187,11 @@ export async function run() {
       minBand: 40,
       minMonths: null,
       valueLabel: '15 % Rabatt',
+      benefitType: 'voucher' as const,
+      voucherDelivery: 'code_pool' as const,
+      voucherCode: 'SUNDAY-LONGEVITY-15',
+      partnerUrl: 'https://www.sunday.de',
+      membersOnly: false,
       sortOrder: 2,
     },
     {
@@ -190,6 +202,8 @@ export async function run() {
       minBand: 50,
       minMonths: null,
       valueLabel: 'Niedrigrisiko-Tarif',
+      benefitType: 'certificate' as const,
+      membersOnly: false,
       sortOrder: 3,
     },
     {
@@ -200,6 +214,8 @@ export async function run() {
       minBand: 60,
       minMonths: 1,
       valueLabel: '15 % Rabatt',
+      benefitType: 'certificate' as const,
+      membersOnly: false,
       sortOrder: 4,
     },
     {
@@ -210,6 +226,10 @@ export async function run() {
       minBand: 80,
       minMonths: null,
       valueLabel: 'Jahresvorrat',
+      benefitType: 'voucher' as const,
+      voucherDelivery: 'code_pool' as const,
+      voucherCode: 'RADEBERGER-ELITE',
+      membersOnly: false,
       sortOrder: 5,
     },
 
@@ -343,6 +363,11 @@ export async function run() {
       minBand: o.minBand,
       minMonths: o.minMonths,
       valueLabel: o.valueLabel,
+      benefitType: (o as { benefitType?: 'payout' | 'voucher' | 'certificate' }).benefitType ?? 'payout',
+      voucherDelivery: (o as { voucherDelivery?: 'code_pool' | 'email' }).voucherDelivery ?? 'email',
+      voucherCode: (o as { voucherCode?: string }).voucherCode ?? null,
+      partnerUrl: (o as { partnerUrl?: string }).partnerUrl ?? null,
+      membersOnly: (o as { membersOnly?: boolean }).membersOnly ?? Boolean(o.organizationId),
       isDemo: true,
       sortOrder: o.sortOrder,
     }))
@@ -362,6 +387,7 @@ export async function run() {
       orgId: null,
       birthDate: '1990-01-01',
       sex: 'm',
+      passwordHash: adminPasswordHash,
     },
     {
       email: 'tk-admin@longevity.app',
@@ -370,6 +396,7 @@ export async function run() {
       orgId: tkId,
       birthDate: '1985-04-12',
       sex: 'm',
+      passwordHash: sharedPasswordHash,
     },
     {
       email: 'barmer-admin@longevity.app',
@@ -378,6 +405,7 @@ export async function run() {
       orgId: barmerId,
       birthDate: '1988-09-23',
       sex: 'f',
+      passwordHash: sharedPasswordHash,
     },
     {
       email: 'aok-admin@longevity.app',
@@ -386,6 +414,7 @@ export async function run() {
       orgId: aokId,
       birthDate: '1982-12-05',
       sex: 'f',
+      passwordHash: sharedPasswordHash,
     },
     {
       email: 'ottonova-admin@longevity.app',
@@ -394,6 +423,7 @@ export async function run() {
       orgId: ottonovaId,
       birthDate: '1991-07-19',
       sex: 'm',
+      passwordHash: sharedPasswordHash,
     },
     {
       email: 'insurer-demo@longevity.app',
@@ -402,6 +432,7 @@ export async function run() {
       orgId: demoOrgId,
       birthDate: '1985-06-01',
       sex: 'f',
+      passwordHash: insurerPasswordHash,
     },
   ];
 
@@ -412,11 +443,13 @@ export async function run() {
       .where(eq(users.email, staff.email))
       .limit(1);
 
+    const userPasswordHash = staff.passwordHash ?? sharedPasswordHash;
+
     if (existing.length > 0) {
       await db
         .update(users)
         .set({
-          passwordHash: sharedPasswordHash,
+          passwordHash: userPasswordHash,
           displayName: staff.displayName,
           role: staff.role,
           organizationId: staff.orgId,
@@ -426,7 +459,7 @@ export async function run() {
     } else {
       await db.insert(users).values({
         email: staff.email,
-        passwordHash: sharedPasswordHash,
+        passwordHash: userPasswordHash,
         displayName: staff.displayName,
         role: staff.role,
         organizationId: staff.orgId,
@@ -841,7 +874,11 @@ export async function run() {
 
   console.log('\n=============================================================');
   console.log('🎉 Alle Testdaten wurden erfolgreich eingespielt!');
-  console.log('Standard-Passwort für alle Accounts: demo-longevity-2026');
+  console.log('Zugangsdaten:');
+  console.log('  • Nutzer:         demo@longevity.app / demo-longevity-2026');
+  console.log('  • Insurer-Admin:  insurer-demo@longevity.app / insurer-longevity-2026');
+  console.log('  • Platform-Admin: admin@longevity.app / admin-longevity-2026');
+  console.log('  • Weitere Kassen: <kasse>-admin@longevity.app / demo-longevity-2026');
   console.log('=============================================================');
   return true;
 }

@@ -13,7 +13,13 @@ async function run() {
 
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, INSURER_EMAIL)).limit(1);
   if (existing.length > 0) {
-    console.log('Demo insurer user already exists, skipping.');
+    const passwordHash = await hashPassword(INSURER_PASSWORD);
+    await db.update(users).set({
+      passwordHash,
+      role: 'insurer_admin',
+      emailVerifiedAt: new Date(),
+    }).where(eq(users.id, existing[0].id));
+    console.log(`Demo insurer user already exists, updated password to ${INSURER_PASSWORD}.`);
     process.exit(0);
   }
 
