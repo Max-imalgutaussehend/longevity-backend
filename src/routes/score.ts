@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db } from '../db/client.js';
 import { scoreSnapshots } from '../db/schema.js';
 import { computeScore, simulate, suggestLevers } from '../score/index.js';
+import { env } from '../env.js';
 import { requireUser, getUserSamples } from './helpers.js';
 import '../types.js';
 
@@ -116,14 +117,14 @@ export async function scoreRoutes(app: FastifyInstance) {
   app.post('/simulate', {
     config: {
       rateLimit: {
-        max: 30,
+        max: env.NODE_ENV === 'test' || env.NODE_ENV === 'development' || !!process.env.CI ? 10_000 : 120,
         timeWindow: '1 minute',
         errorResponseBuilder: () => ({
           statusCode: 429,
           type: 'about:blank',
           title: 'Rate-Limit überschritten.',
           status: 429,
-          detail: 'Maximal 30 Simulationen pro Minute.',
+          detail: 'Maximal 120 Simulationen pro Minute.',
         }),
       },
     },
